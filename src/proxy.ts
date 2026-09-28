@@ -1,9 +1,13 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+// Renamed from middleware.ts (Next.js 16 deprecated Middleware in favour of Proxy). This is not just a rename:
+// Proxy defaults to the Node.js runtime, while Middleware ran on the Edge runtime — and Vercel's sensitive/secret
+// environment variables are only available to Node.js functions, never to Edge. Every request 500'd in production
+// because NEXT_PUBLIC_SUPABASE_URL/ANON_KEY (marked sensitive) came back empty under the old Edge middleware.
 const PROTECTED_PREFIXES = ["/dashboard", "/leads", "/pipeline", "/ads", "/social", "/content", "/finance", "/projects", "/settings", "/onboarding"];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
