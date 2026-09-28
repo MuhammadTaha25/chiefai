@@ -1,0 +1,18 @@
+# Local-only artifacts — never upload these to Vercel.
+# (node_modules, .next, .env* and .vercel are already excluded by .gitignore,
+#  which the Vercel CLI also honours.)
+
+# Large reference dumps kept only for local spec lookups
+scratchpad_openapi2.json
+scratch_openapi3.json
+
+# Build/type caches
+tsconfig.tsbuildinfo
+
+# Runtime logs and scratch output
+*.log
+scratchpad/
+.test_ids.json
+
+# Editing tool config
+.claude/
