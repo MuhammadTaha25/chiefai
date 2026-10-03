@@ -29,7 +29,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
         id: "business_name",
         label: "Business name",
         help: "What is your company or brand called?",
-        example: "Infomist",
+        example: "Northstar",
         type: "text",
         required: true,
       },

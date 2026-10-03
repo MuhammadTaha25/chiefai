@@ -18,8 +18,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Infomist — Autonomous growth for your business",
-  description: "AI-run lead generation, social media, and finance — all on one dashboard.",
+  title: "Northstar — Executive workspace for agency leaders",
+  description: "A private operating workspace for leads, campaigns, projects, and finance.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

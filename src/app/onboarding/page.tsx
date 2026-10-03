@@ -35,7 +35,7 @@ export default function OnboardingPage() {
     <div className="flex min-h-screen items-center justify-center bg-canvas px-6">
       <form onSubmit={submit} className="w-full max-w-sm panel panel-body space-y-4">
         <div>
-          <h1 className="type-heading text-ink">Welcome to Infomist</h1>
+          <h1 className="type-heading text-ink">Welcome to Northstar</h1>
           <p className="mt-1 type-caption text-ink-tertiary">
             Just a couple of quick details to get your account started — you can fill in everything
             else (marketing voice, connecting accounts, domain) later from Settings, whenever you&apos;re ready.

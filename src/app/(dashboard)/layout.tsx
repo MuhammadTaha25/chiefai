@@ -8,5 +8,5 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (!user) redirect("/login");
   if (!client) redirect("/onboarding");
 
-  return <AppShell companyName={client.company_name ?? "Infomist"}>{children}</AppShell>;
+  return <AppShell companyName={client.company_name ?? "Executive Workspace"}>{children}</AppShell>;
 }

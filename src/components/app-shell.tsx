@@ -25,6 +25,9 @@ import {
   Bell,
   Moon,
   Sun,
+  Compass,
+  Activity,
+  ArrowRight,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -32,8 +35,15 @@ type NavItem = { href: string; label: string; icon: typeof LayoutDashboard };
 
 const NAV: { section: string; items: NavItem[] }[] = [
   {
-    section: "Overview",
-    items: [{ href: "/dashboard", label: "Dashboard", icon: LayoutDashboard }],
+    section: "Workspace",
+    items: [
+      { href: "/workspace/overview", label: "Overview", icon: LayoutDashboard },
+      { href: "/workspace/leads", label: "Leads & pipeline", icon: Users },
+      { href: "/workspace/campaigns", label: "Campaigns & content", icon: Megaphone },
+      { href: "/workspace/projects", label: "Projects", icon: FolderKanban },
+      { href: "/workspace/finance", label: "Finance", icon: Wallet },
+      { href: "/workspace/activity", label: "Activity", icon: Activity },
+    ],
   },
   {
     section: "Growth",
@@ -88,7 +98,7 @@ export default function AppShell({ children, companyName }: { children: ReactNod
     router.refresh();
   }
 
-  const title = TITLES[pathname] ?? "Dashboard";
+  const title = TITLES[pathname] ?? "Overview";
   const initials = companyName
     .split(" ")
     .map((w) => w[0])
@@ -105,11 +115,22 @@ export default function AppShell({ children, companyName }: { children: ReactNod
         }`}
       >
         <div className="flex h-14 items-center gap-2 border-b border-hairline px-3">
-          <div className="grid size-6 shrink-0 place-items-center rounded-sm bg-primary text-[11px] font-semibold text-primary-foreground">
-            I
+          <div className="grid size-6 shrink-0 place-items-center rounded-full bg-[#7357FF] text-white">
+            <Compass className="size-3.5" />
           </div>
-          {!collapsed && <span className="type-subhead truncate text-ink">Infomist</span>}
+          {!collapsed && <span className="type-subhead truncate text-ink">Northstar</span>}
         </div>
+
+        {!collapsed && (
+          <div className="border-b border-hairline px-3 py-2.5">
+            <button className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left hover:bg-sunken">
+              <span className="min-w-0">
+                <span className="block truncate text-[0.8125rem] font-medium text-ink">{companyName}</span>
+                <span className="block text-[0.6875rem] text-ink-tertiary">Agency workspace</span>
+              </span>
+            </button>
+          </div>
+        )}
 
         <nav className="flex-1 overflow-y-auto px-2 py-4">
           {NAV.map((group) => (
@@ -120,18 +141,26 @@ export default function AppShell({ children, companyName }: { children: ReactNod
                   const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
                   const Icon = item.icon;
                   return (
-                    <li key={item.href}>
+                    <li key={item.href} className="relative">
+                      {active && !collapsed && (
+                        <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-[#7357FF]" aria-hidden />
+                      )}
                       <Link
                         href={item.href}
                         title={item.label}
                         className={`flex h-9 items-center gap-2 rounded-md px-2 text-[0.9375rem] transition-colors duration-150 ease-out ${
                           active
-                            ? "bg-accent text-accent-foreground"
+                            ? "bg-[rgba(115,87,255,0.08)] text-[#5B43D6]"
                             : "text-ink-secondary hover:bg-sunken hover:text-ink"
                         }`}
                       >
                         <Icon className="size-4 shrink-0" />
-                        {!collapsed && <span className="truncate">{item.label}</span>}
+                        {!collapsed && <span className="truncate flex-1">{item.label}</span>}
+                        {!collapsed && item.label === "Activity" && (
+                          <span className="grid size-4 shrink-0 place-items-center rounded-full bg-[#F08C46] text-[9px] font-semibold text-white">
+                            3
+                          </span>
+                        )}
                       </Link>
                     </li>
                   );
@@ -139,9 +168,36 @@ export default function AppShell({ children, companyName }: { children: ReactNod
               </ul>
             </div>
           ))}
+
+          {!collapsed && (
+            <Link
+              href="/workspace/overview"
+              className="mb-2 block rounded-lg p-3"
+              style={{ background: "linear-gradient(135deg, #162238, #101828)" }}
+            >
+              <p className="text-[11px] font-semibold text-[#C7F36B]">Focus mode</p>
+              <p className="mt-1 text-[12px] leading-snug text-white/90">
+                Three decisions are ready for your review.
+              </p>
+              <span className="mt-2 inline-flex items-center gap-1 text-[12px] font-semibold text-white">
+                Open briefing <ArrowRight className="size-3" />
+              </span>
+            </Link>
+          )}
         </nav>
 
         <div className="border-t border-hairline p-2">
+          {!collapsed && (
+            <div className="flex items-center gap-2 px-2 py-2">
+              <span className="grid size-7 shrink-0 place-items-center rounded-full bg-[#101828] text-[11px] font-semibold text-white">
+                AH
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-[0.8125rem] font-medium text-ink">Alex Hart</span>
+                <span className="block text-[0.6875rem] text-ink-tertiary">CEO</span>
+              </span>
+            </div>
+          )}
           <button
             onClick={() => setCollapsed((c) => !c)}
             className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-[0.8125rem] text-ink-secondary transition-colors duration-150 ease-out hover:bg-sunken hover:text-ink"
@@ -154,16 +210,21 @@ export default function AppShell({ children, companyName }: { children: ReactNod
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-4 border-b border-hairline bg-raised px-4 md:px-8">
-          <h2 className="type-subhead truncate text-ink">{title}</h2>
+          <p className="type-caption truncate text-ink-tertiary">
+            Workspace <span className="px-1">/</span> <span className="text-ink">{title}</span>
+          </p>
           <div className="flex items-center gap-1">
             <div className="relative hidden sm:block">
               <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-ink-tertiary" />
               <input
                 type="search"
-                placeholder="Search"
-                aria-label="Search"
-                className="h-9 w-[200px] rounded-md border border-strong bg-raised pr-3 pl-8 text-[0.8125rem] text-ink placeholder:text-ink-tertiary focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+                placeholder="Search workspace"
+                aria-label="Search workspace"
+                className="h-9 w-[220px] rounded-md border border-strong bg-raised pr-10 pl-8 text-[0.8125rem] text-ink placeholder:text-ink-tertiary focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
               />
+              <span className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded border border-strong px-1 text-[10px] text-ink-tertiary">
+                ⌘K
+              </span>
             </div>
             <button
               aria-label="Notifications"

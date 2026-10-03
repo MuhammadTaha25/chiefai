@@ -1,0 +1,90 @@
+/*
+ * Northstar executive workspace — scoped design tokens.
+ * Applied only within .ns-root so the rest of the app (real backend-wired
+ * pages) keeps its existing "operations console" design system untouched.
+ */
+.ns-root {
+  --ns-ink: #101828;
+  --ns-navy: #162238;
+  --ns-brand: #7357ff;
+  --ns-brand-dark: #5b43d6;
+  --ns-accent: #c7f36b;
+  --ns-mist: #f7f8fc;
+  --ns-white: #ffffff;
+  --ns-slate: #667085;
+  --ns-muted: #98a2b3;
+  --ns-border: #e4e7ec;
+  --ns-soft: #f1f3f7;
+  --ns-midnight: #111827;
+  --ns-success: #16a36b;
+  --ns-warning: #f08c46;
+  --ns-info: #3485d8;
+
+  background: var(--ns-mist);
+  color: var(--ns-ink);
+  font-feature-settings: "tnum";
+}
+
+.ns-root * {
+  border-color: var(--ns-border);
+}
+
+.ns-card {
+  background: var(--ns-white);
+  border: 1px solid var(--ns-border);
+  border-radius: 14px;
+}
+
+.ns-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ns-muted);
+}
+
+.ns-kpi {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--ns-ink);
+  line-height: 1.1;
+}
+
+.ns-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--ns-ink);
+  letter-spacing: -0.01em;
+}
+
+.ns-section-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ns-ink);
+}
+
+.ns-body {
+  font-size: 13px;
+  color: var(--ns-slate);
+}
+
+.ns-focus:focus-visible {
+  outline: 2px solid var(--ns-brand);
+  outline-offset: 2px;
+}
+
+.ns-scrollbar::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.ns-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--ns-border);
+  border-radius: 999px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ns-root * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
