@@ -3,8 +3,8 @@
 The temporary Cloudflare **quick tunnel** (`*.trycloudflare.com`) cannot be made
 permanent: the hostname is random, it changes on every restart, and it only
 exists while this PC is on and `cloudflared` is running. Moving to a real host
-is the only fix — and it also switches ON every cron in `vercel.json`, which
-currently never runs (Vercel crons only fire on a Vercel deployment).
+is the only fix. Note: `vercel.json` no longer declares any crons (see `CRONS.md`), so on Vercel the
+scheduled jobs only run once you add an external scheduler such as cron-job.org.
 
 ## What this fixes
 
@@ -12,7 +12,7 @@ currently never runs (Vercel crons only fire on a Vercel deployment).
 |---|---|
 | Webhook URL changes on every restart → Zernio comment/DM events POST into a dead origin | Permanent URL; `/api/cron/sync-endpoints` re-points the Zernio webhooks automatically every 10 min |
 | PC must stay on | Runs in the cloud |
-| **No cron ever runs** — `vercel.json` has 10 crons (ads sync, social posts/stories, follow-ups, calendly, domain provisioning, bridge repair) and none of them fire locally | All 10 run |
+| **No cron ever runs** — the 10 jobs (ads sync, social posts/stories, follow-ups, calendly, domain provisioning, bridge repair, voice daily call) only fire when something calls them | Add the jobs listed in `CRONS.md` to cron-job.org (or `vercel.json` on a Pro plan) and all of them run |
 | `ad_performance` is always empty → the finance gate permanently returns `pending_human` | `/api/ads/sync` (`*/30`) actually writes performance |
 | Empty Meta stats in the dashboard | Real spend/impressions/clicks/CTR |
 | A new user clicking "Connect Facebook" needs the PC on | Works for anyone, anywhere |
