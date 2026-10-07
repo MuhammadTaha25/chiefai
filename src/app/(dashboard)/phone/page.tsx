@@ -1,7 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentClient } from "@/lib/get-current-client";
-import { getCallSettings, type CallSettings } from "@/lib/voice/call-settings";
+import { getCallSettings, DEFAULTS, type CallSettings } from "@/lib/voice/call-settings";
+import { formatInTimezone } from "@/lib/format-time";
 import VoiceNumberPanel from "@/components/voice-number-panel";
 import { getPinHash } from "@/lib/voice/pin";
 import CallSettingsPanel from "@/components/call-settings-panel";
@@ -51,6 +52,9 @@ export default async function PhonePage() {
     }
   }
 
+  // This page renders on the server, whose clock is UTC on Vercel — show times in the owner's own timezone.
+  const displayTz = settings?.daily_call_timezone || DEFAULTS.daily_call_timezone;
+
   const calls = (callRows ?? []) as unknown as {
     id: string;
     direction: string | null;
@@ -98,7 +102,7 @@ export default async function PhonePage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-black/[.08] text-left text-xs text-zinc-500 dark:border-white/[.145]">
-                <th className="px-4 py-3 font-medium">When</th>
+                <th className="px-4 py-3 font-medium">When ({displayTz})</th>
                 <th className="px-4 py-3 font-medium">Direction</th>
                 <th className="px-4 py-3 font-medium">Duration</th>
                 <th className="px-4 py-3 font-medium">Transcript</th>
@@ -107,7 +111,7 @@ export default async function PhonePage() {
             <tbody>
               {calls.map((c) => (
                 <tr key={c.id} className="border-b border-black/[.06] last:border-0 dark:border-white/[.08]">
-                  <td className="px-4 py-3 text-zinc-500">{new Date(c.created_at).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-zinc-500">{formatInTimezone(c.created_at, displayTz)}</td>
                   <td className="px-4 py-3 capitalize">{c.direction ?? "—"}</td>
                   <td className="px-4 py-3">{c.duration_seconds != null ? `${c.duration_seconds}s` : "—"}</td>
                   <td className="px-4 py-3 text-zinc-500">{c.transcript ? `${c.transcript.slice(0, 60)}…` : "—"}</td>
