@@ -10,6 +10,7 @@ import { unsignedWebhooksAllowed } from "@/lib/webhook-security";
 import { logEvent } from "@/lib/log-event";
 import { getCallSettings } from "@/lib/voice/call-settings";
 import { bridgeConfigured } from "@/lib/voice/bridge";
+import { liveStreamReachable } from "@/lib/voice/stream-availability";
 import { getPinHash } from "@/lib/voice/pin";
 import { mintSessionToken } from "@/lib/voice/session-token";
 
@@ -110,13 +111,18 @@ export async function POST(req: NextRequest) {
   const settings = await getCallSettings(admin, clientId).catch(() => null);
   const outbound = (params.Direction ?? "").startsWith("outbound");
   const pinSet = Boolean(await getPinHash(admin, clientId).catch(() => null));
-  if (!outbound && !pinSet && !callerAllowed(from, settings?.personal_phone_number ?? null)) {
+  // The live stream is only usable when its bridge can actually be reached (never on Vercel without an
+  // external VOICE_STREAM_URL). Otherwise the call is answered by the spoken-report flow further down.
+  const live = bridgeConfigured() && liveStreamReachable();
+  // A PIN is only ever asked for inside the live stream. When the call is NOT streamed, nobody would ask
+  // for the PIN, so the caller-ID check must apply even on a PIN-protected line.
+  if (!outbound && (!pinSet || !live) && !callerAllowed(from, settings?.personal_phone_number ?? null)) {
     logEvent("voice.twiml", { client_id: clientId, result: "caller_not_owner" });
     return twiml(`<Say voice="Polly.Joanna">This line is private. If you are the owner, save your mobile number in the Phone page of your dashboard and call again. Goodbye.</Say><Hangup/>`);
   }
 
   // Preferred path: live Gemini native audio (multilingual, interruptible).
-  if (bridgeConfigured() && !speech && turn === 0) {
+  if (live && !speech && turn === 0) {
     const reason = outbound ? "daily_report" : "inbound";
     const { exp, token } = mintSessionToken(clientId, reason);
     logEvent("voice.twiml", { client_id: clientId, result: "stream", reason });

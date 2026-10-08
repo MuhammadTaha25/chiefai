@@ -155,7 +155,7 @@ Numbers whose `elevenlabs_phone_number_id` is a real `phnum_…` are **skipped**
 those were deliberately imported into ElevenLabs and re-pointing them would take
 them away from that agent.
 
-It runs on a schedule (see `CRONS.md` — an external scheduler calls it, `vercel.json` itself declares no crons), and locally:
+It runs on a schedule (see `CRONS.md` — `vercel.json` declares no crons), and locally:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\dev-tunnel.ps1
@@ -171,7 +171,7 @@ Self-healing covers drift, but if you want an origin that **never changes**:
 | Option | What it needs | Survives the PC being off |
 |---|---|---|
 | **Cloudflare named tunnel** | a Cloudflare account, a domain on it, and `cloudflared tunnel login` — then `cloudflared tunnel create infomist` + a DNS route. Gives `https://voice.yourdomain.com` forever. | No — the tunnel still forwards to your machine |
-| **Deploy the app (Vercel)** | a Vercel account, plus a free external scheduler (cron-job.org — see `CRONS.md`) to actually trigger the cron routes. Gives `<project>.vercel.app` (or your domain). | **Yes** |
+| **Deploy the app (Vercel)** | a Vercel account; crons are NOT in `vercel.json`; add them via an external scheduler (see `CRONS.md`). Gives `<project>.vercel.app` (or your domain). | **Yes** |
 | **ngrok reserved domain** | an ngrok account and its authtoken (`ngrok config add-authtoken …`) | No |
 
 None of these can be set up without an account of your own — which is why the
@@ -208,5 +208,11 @@ Twilio call ─▶ /api/voice/twiml ─▶ <Connect><Stream wss://APP/api/voice/
 - The daily call fires at the chosen local time (2-hour grace window, once per day). The in-app
   scheduler runs the `voice` job by default.
 - Brief content: emails today per mailbox, social posts with times, domains, leads, replies, deals.
+- **On Vercel** the bridge cannot run. Calls automatically use the spoken-report (Polly) flow instead of the live
+  stream, unless `VOICE_STREAM_URL` points at a bridge hosted elsewhere. Inbound calls in that flow are always
+  caller-ID checked (the PIN is only asked inside the live stream).
+- **The daily call needs a scheduler.** Vercel does not run it (`vercel.json` has no crons): add
+  `GET /api/cron/voice-daily-call` to cron-job.org (hourly, `Authorization: Bearer $CRON_SECRET`). Check it with
+  `?dry_run=1&hour=16` first.
 - **Twilio prerequisites:** enable Voice Geographic Permissions for Pakistan (+92) in the Twilio
   console, and on a trial account verify the destination mobile.

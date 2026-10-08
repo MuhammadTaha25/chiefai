@@ -1,4 +1,4 @@
-# Infomist
+#  Infomist
 
 Client-facing web app for Infomist. Next.js (App Router) + Supabase Auth/Postgres.
 All automation and AI decision-making lives in n8n — this app only renders live

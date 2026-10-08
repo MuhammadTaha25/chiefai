@@ -1,34 +1,15 @@
 import Link from "next/link";
-import { Compass, Users, Megaphone, Wallet } from "lucide-react";
-
-const FEATURES = [
-  {
-    title: "Leads & pipeline",
-    body: "AI finds, researches, and follows up with qualified leads so the pipeline keeps moving without you chasing it.",
-    icon: Users,
-  },
-  {
-    title: "Campaigns & content",
-    body: "Social content and ad spend run on autopilot — you approve the budget and the direction.",
-    icon: Megaphone,
-  },
-  {
-    title: "Finance & projects",
-    body: "Revenue, spend, and project health roll up into one view, with a chief of staff you can just ask.",
-    icon: Wallet,
-  },
-];
+import { FAQS, FEATURES, SITE, buildStructuredData, serializeJsonLd } from "@/lib/seo";
 
 export default function Home() {
   return (
-    <div className="flex flex-1 flex-col" style={{ background: "#F7F8FC" }}>
+    <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(buildStructuredData()) }}
+      />
       <header className="flex items-center justify-between px-6 py-5 sm:px-12">
-        <span className="flex items-center gap-2 text-[15px] font-semibold tracking-tight" style={{ color: "#101828" }}>
-          <span className="grid size-7 place-items-center rounded-full text-white" style={{ background: "#7357FF" }}>
-            <Compass className="size-4" />
-          </span>
-          Northstar
-        </span>
+        <span className="text-lg font-semibold tracking-tight">{SITE.name}</span>
         <nav className="flex items-center gap-4 text-sm font-medium">
           <Link href="/login" className="text-zinc-600 hover:text-zinc-950">
             Log in
@@ -44,16 +25,13 @@ export default function Home() {
       </header>
 
       <main className="flex flex-1 flex-col items-center justify-center px-6 py-20 text-center sm:px-12">
-        <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.1em]" style={{ color: "#98A2B3" }}>
-          Executive operating workspace
-        </p>
-        <h1 className="max-w-2xl text-4xl font-semibold tracking-tight sm:text-5xl" style={{ color: "#101828" }}>
-          Run your whole agency from one private workspace.
+        <h1 className="max-w-2xl text-4xl font-semibold tracking-tight sm:text-5xl">
+          ChiefAI: your whole growth team, run by AI.
         </h1>
-        <p className="mt-6 max-w-xl text-lg" style={{ color: "#667085" }}>
-          Northstar provisions your domain and mailboxes, runs lead generation and outreach,
-          posts and optimizes your social and ads, and tracks the finances — all visible in one
-          calm, executive-grade workspace.
+        <p className="mt-6 max-w-xl text-lg text-zinc-600 dark:text-zinc-400">
+          ChiefAI provisions your domain and mailboxes, runs lead generation and outreach,
+          posts and optimizes your social + ads, and tracks the finance — all visible on one
+          live dashboard.
         </p>
         <Link
           href="/signup"
@@ -66,15 +44,30 @@ export default function Home() {
         <div className="mt-20 grid max-w-4xl gap-6 text-left sm:grid-cols-3">
           {FEATURES.map((f) => (
             <div key={f.title} className="rounded-xl border p-6" style={{ borderColor: "#E4E7EC", background: "#fff" }}>
-              <span className="mb-3 grid size-9 place-items-center rounded-full" style={{ background: "#F1F3F7" }}>
-                <f.icon className="size-4" style={{ color: "#7357FF" }} />
-              </span>
               <h3 className="font-semibold" style={{ color: "#101828" }}>{f.title}</h3>
               <p className="mt-2 text-sm" style={{ color: "#667085" }}>{f.body}</p>
             </div>
           ))}
         </div>
+
+        <section aria-labelledby="faq-heading" className="mt-20 w-full max-w-3xl text-left">
+          <h2 id="faq-heading" className="text-2xl font-semibold tracking-tight">
+            ChiefAI FAQs
+          </h2>
+          <div className="mt-6 space-y-3">
+            {FAQS.map((f) => (
+              <div key={f.question} className="rounded-xl border border-black/[.08] p-5 dark:border-white/[.145]">
+                <h3 className="font-semibold">{f.question}</h3>
+                <p className="mt-1.5 text-sm text-zinc-600 dark:text-zinc-400">{f.answer}</p>
+              </div>
+            ))}
+          </div>
+        </section>
       </main>
+
+      <footer className="px-6 py-8 text-center text-sm text-zinc-500 sm:px-12">
+        © {new Date().getFullYear()} {SITE.name}. AI chief of staff for lead generation, social and finance.
+      </footer>
     </div>
   );
 }

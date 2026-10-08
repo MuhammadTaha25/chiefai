@@ -1,6 +1,23 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import LandingForm from "@/components/landing-form";
+
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params;
+  const admin = createAdminClient();
+  const { data: client } = await admin
+    .from("clients")
+    .select("company_name")
+    .eq("landing_slug", slug)
+    .maybeSingle();
+  if (!client) return { title: "Not found", robots: { index: false, follow: false } };
+  return {
+    title: client.company_name,
+    description: `Get in touch with ${client.company_name}. Leave your details and we'll be in touch shortly.`,
+    alternates: { canonical: `/lp/${slug}` },
+  };
+}
 
 export default async function PublicLandingPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
