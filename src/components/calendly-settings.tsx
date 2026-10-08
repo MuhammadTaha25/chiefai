@@ -5,9 +5,12 @@ import { useState } from "react";
 export default function CalendlySettings({
   initialUrl,
   connected,
+  businessName,
 }: {
   initialUrl: string;
   connected: boolean;
+  /** Shown instead of the raw calendly.com/<slug> link, which is set by whoever owns that Calendly account — not something this app can rename. */
+  businessName?: string | null;
 }) {
   const [url, setUrl] = useState(initialUrl);
   const [loading, setLoading] = useState(false);
@@ -50,6 +53,13 @@ export default function CalendlySettings({
           </span>
         )}
       </div>
+
+      {connected && (
+        <p className="text-sm text-zinc-500">
+          Booking link: <span className="font-medium text-foreground">{businessName ? `Book with ${businessName}` : "Your Calendly scheduling page"}</span>
+          {" — "}the exact calendly.com address is set in your own Calendly account, not here.
+        </p>
+      )}
 
       <details className="text-sm text-zinc-500">
         <summary className="cursor-pointer select-none">Or paste your scheduling link manually</summary>

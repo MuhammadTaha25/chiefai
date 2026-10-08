@@ -52,8 +52,8 @@ export default async function SettingsPage(props: {
     supabase.from("mailboxes").select("*").returns<Mailbox[]>(),
     supabase
       .from("clients")
-      .select("calendly_url, calendly_connected_at, calendly_webhook_uri")
-      .maybeSingle<{ calendly_url: string | null; calendly_connected_at: string | null; calendly_webhook_uri: string | null }>(),
+      .select("calendly_url, calendly_connected_at, calendly_webhook_uri, company_name")
+      .maybeSingle<{ calendly_url: string | null; calendly_connected_at: string | null; calendly_webhook_uri: string | null; company_name: string | null }>(),
     supabase
       .from("client_phone_numbers")
       .select("twilio_number, status")
@@ -147,7 +147,11 @@ export default async function SettingsPage(props: {
               ? "Bookings are synced from Calendly every few minutes (Calendly webhooks need a paid Calendly plan)."
               : "Connect Calendly so bookings are picked up automatically."}
         </p>
-        <CalendlySettings initialUrl={client?.calendly_url ?? ""} connected={Boolean(client?.calendly_connected_at)} />
+        <CalendlySettings
+          initialUrl={client?.calendly_url ?? ""}
+          connected={Boolean(client?.calendly_connected_at)}
+          businessName={client?.company_name ?? null}
+        />
       </section>
 
       <section>
