@@ -12,6 +12,7 @@ export default function SignupPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
+  const [agreedToPolicies, setAgreedToPolicies] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -80,11 +81,32 @@ export default function SignupPage() {
           />
         </div>
 
+        <label className="flex items-start gap-2.5 text-sm text-zinc-600 dark:text-zinc-400">
+          <input
+            type="checkbox"
+            required
+            checked={agreedToPolicies}
+            onChange={(e) => setAgreedToPolicies(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-300 dark:border-zinc-700"
+          />
+          <span>
+            I agree to the{" "}
+            <Link href="/terms" target="_blank" rel="noopener noreferrer" className="font-medium underline">
+              Terms and Conditions
+            </Link>{" "}
+            and{" "}
+            <Link href="/privacy" target="_blank" rel="noopener noreferrer" className="font-medium underline">
+              Privacy Policy
+            </Link>
+            .
+          </span>
+        </label>
+
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || !agreedToPolicies}
           className="w-full rounded-full bg-foreground px-5 py-2.5 font-medium text-background transition-colors hover:bg-[#383838] disabled:opacity-50 dark:hover:bg-[#ccc]"
         >
           {loading ? "Creating account…" : "Sign up"}
