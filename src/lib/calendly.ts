@@ -123,6 +123,29 @@ export interface CalendlyInvitee {
   endTime: string;
   eventTypeUri: string | null;
   scheduledEventUri: string;
+  /** Everything below is best-effort — used for the confirmation emails, never required for recording the booking itself. */
+  name?: string | null;
+  timezone?: string | null;
+  cancelUrl?: string | null;
+  rescheduleUrl?: string | null;
+  /** The Calendly Event Type's own (static) name, e.g. "Discovery / Consultation Call". */
+  eventName?: string | null;
+  /** Join link or physical location, flattened to one display string. */
+  location?: string | null;
+}
+
+/** Best-effort flatten of Calendly's `location` object (varies by type: zoom/google_meet/custom/physical/...) to one string. */
+function flattenCalendlyLocation(loc: unknown): string | null {
+  if (!loc || typeof loc !== "object") return null;
+  const l = loc as Record<string, unknown>;
+  return (
+    (typeof l.join_url === "string" && l.join_url) ||
+    (typeof l.location === "string" && l.location) ||
+    (typeof l.data === "object" && l.data && typeof (l.data as Record<string, unknown>).join_url === "string"
+      ? ((l.data as Record<string, unknown>).join_url as string)
+      : null) ||
+    null
+  );
 }
 
 /** Lists invitees of this user's events from `sinceIso` on (works on Calendly's free plan — unlike webhooks). */
@@ -135,16 +158,26 @@ export async function listRecentInvitees(accessToken: string, userUri: string, s
   if (!evRes.ok) throw new Error(`Calendly scheduled_events failed: ${evRes.status}`);
   const events = ((await evRes.json()).collection ?? []) as {
     uri: string;
+    name?: string;
     start_time: string;
     end_time: string;
     event_type: string;
+    location?: unknown;
   }[];
   const out: CalendlyInvitee[] = [];
   for (const ev of events) {
     const uuid = ev.uri.split("/").pop();
     const invRes = await fetch(`https://api.calendly.com/scheduled_events/${uuid}/invitees?count=100`, { headers });
     if (!invRes.ok) continue;
-    for (const inv of ((await invRes.json()).collection ?? []) as { uri: string; email: string; status: string }[]) {
+    for (const inv of ((await invRes.json()).collection ?? []) as {
+      uri: string;
+      email: string;
+      status: string;
+      name?: string;
+      timezone?: string;
+      cancel_url?: string;
+      reschedule_url?: string;
+    }[]) {
       out.push({
         inviteeUri: inv.uri,
         email: inv.email,
@@ -153,6 +186,12 @@ export async function listRecentInvitees(accessToken: string, userUri: string, s
         endTime: ev.end_time,
         eventTypeUri: ev.event_type ?? null,
         scheduledEventUri: ev.uri,
+        name: inv.name ?? null,
+        timezone: inv.timezone ?? null,
+        cancelUrl: inv.cancel_url ?? null,
+        rescheduleUrl: inv.reschedule_url ?? null,
+        eventName: ev.name ?? null,
+        location: flattenCalendlyLocation(ev.location),
       });
     }
   }

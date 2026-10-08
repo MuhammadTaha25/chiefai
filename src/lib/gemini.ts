@@ -314,6 +314,52 @@ Plain text only, no markdown. Respond with ONLY valid JSON matching exactly: {"s
 }
 
 /**
+ * The dynamic, conversation-derived meeting subject — distinct from the
+ * Calendly Event Type's own STATIC name ("Discovery / Consultation Call"),
+ * which never changes. Generated once, the moment a reply is classified
+ * BOOKING (see src/app/api/webhooks/mailgun/route.ts), and persisted on the
+ * lead from there — never regenerated at signup or Calendly-connect time.
+ *
+ * Grounded strictly in what was actually said: falls back to the generic
+ * event name rather than inventing a specific service/problem the
+ * conversation never mentioned.
+ */
+export async function generateMeetingTopic(params: {
+  theirReply: string;
+  ourLastMessage?: string;
+  businessContext?: string;
+}): Promise<string> {
+  const FALLBACK = "Discovery / Consultation Call";
+  try {
+    const prompt = `${params.businessContext ? params.businessContext + "\n\n" : ""}A lead just agreed to book a call. Write a short (3-7 word) meeting topic/subject line that reflects ONLY what they actually said they're interested in discussing — grounded strictly in the conversation below, never a service or problem that isn't mentioned.
+
+${params.ourLastMessage ? `Conversation so far (oldest first):
+"""
+${untrusted(params.ourLastMessage)}
+"""
+` : ""}
+Their latest reply (the one that triggered the booking):
+"""
+${untrusted(params.theirReply)}
+"""
+
+Rules:
+- If the conversation names a specific service, product or problem, the topic must name it too (e.g. "AI Customer Support Automation Discussion", "Lead Generation Automation Discussion").
+- If the conversation is generic with no specific topic mentioned, respond with exactly: "${FALLBACK}" — do not invent a specific topic that was never discussed.
+- Title case, no trailing punctuation, no quotes.
+
+Respond with ONLY valid JSON matching exactly: {"topic": string}`;
+    const result = await generateJson<{ topic: string }>(prompt);
+    const topic = result.topic?.trim();
+    return topic || FALLBACK;
+  } catch {
+    // A model hiccup must never block the booking link from going out — the
+    // caller already has a safe default event name to fall back to.
+    return FALLBACK;
+  }
+}
+
+/**
  * Follow-up nudge for a lead who hasn't replied yet — references that this
  * is a follow-up (not a first touch) without being annoying about it.
  */

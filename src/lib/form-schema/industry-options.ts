@@ -48,7 +48,10 @@ export function interestsForIndustry(values: FormValues): FieldOption[] {
 /** "Who should we contact" style buyer personas, based on the target industry (lead-gen section 2). */
 const CONTACT_PERSONA_HINTS: Record<string, string[]> = {
   "Real Estate": ["Property Buyers", "Investors", "Sellers", "Landlords", "Tenants"],
-  "Software / SaaS": ["Founders", "CTOs", "IT Managers", "Operations Managers", "Sales Leaders"],
+  // "Founder" and "CTO" are left out here — they're already in the base list
+  // below, and the plural form ("Founders"/"CTOs") doesn't match it as a
+  // string, so both would otherwise show up twice in the picker.
+  "Software / SaaS": ["IT Managers", "Operations Managers", "Sales Leaders"],
   "E-commerce": ["Store Owners", "Ecommerce Managers", "Marketing Leads"],
 };
 

@@ -2,7 +2,7 @@ import { getClientBusinessContext, formatBusinessContext } from "@/lib/business-
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendMail, mailgunDomainForAddress, getMailboxReadiness } from "@/lib/mailgun";
-import { classifyReply, draftReplyEmail, type ReplySentiment } from "@/lib/gemini";
+import { classifyReply, draftReplyEmail, generateMeetingTopic, type ReplySentiment } from "@/lib/gemini";
 import { isUnsubscribeRequest, unsubscribeConfirmation, isAutomatedMessage } from "@/lib/compliance";
 import { insertOutreachLog, REPLY_TOUCH_NUMBER } from "@/lib/outreach-log";
 import { logEvent } from "@/lib/log-event";
@@ -329,6 +329,21 @@ export async function POST(req: NextRequest) {
     // the link (draftReplyEmail already handles calendlyUrl: null safely).
     const calendlyUrl = client?.calendly_url ?? null;
 
+    // The dynamic meeting topic is resolved HERE — the moment a reply is
+    // classified BOOKING — not at signup or Calendly-connect time, and
+    // carried on the lead row so the eventual Calendly booking (recorded
+    // independently, possibly minutes or days later) inherits exactly what
+    // this conversation was about. Grounded in the actual reply text; falls
+    // back to a generic event name rather than guessing a specific topic.
+    const meetingTopic =
+      classification === "BOOKING"
+        ? await generateMeetingTopic({
+            theirReply: bodyPlain,
+            ourLastMessage: history || undefined,
+            businessContext: formatBusinessContext(await getClientBusinessContext(admin, lead.client_id)),
+          }).catch(() => null)
+        : null;
+
     const { error: leadUpdateError } = await admin
       .from("leads")
       .update({
@@ -342,6 +357,7 @@ export async function POST(req: NextRequest) {
         // sequence (spec §19, §33) — BOOKING/HAPPY/ANGRY/UNCLEAR all clear
         // it; UNCLEAR must NOT restart it either (§18).
         next_follow_up_at: null,
+        ...(meetingTopic ? { meeting_topic: meetingTopic } : {}),
         ...(classification === "ANGRY"
           ? { tone_recovery_attempts: (lead.tone_recovery_attempts ?? 0) + 1 }
           : {}),

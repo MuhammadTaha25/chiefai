@@ -80,6 +80,11 @@ export async function POST(req: NextRequest) {
   const calendlyEventId = payload.uri as string | undefined; // invitee URI — unique per booking
   const inviteeEmail = (payload.email as string | undefined)?.trim().toLowerCase();
   const scheduledEvent = payload.scheduled_event ?? {};
+  const location = scheduledEvent.location;
+  const meetingLocation =
+    (typeof location?.join_url === "string" && location.join_url) ||
+    (typeof location?.location === "string" && location.location) ||
+    null;
 
   if (!calendlyEventId || !inviteeEmail) {
     // Can't safely process — log for manual resolution rather than guessing
@@ -96,6 +101,12 @@ export async function POST(req: NextRequest) {
     endTime: scheduledEvent.end_time,
     eventTypeUri: scheduledEvent.event_type ?? null,
     scheduledEventUri: scheduledEvent.uri ?? null,
+    name: (payload.name as string | undefined) ?? null,
+    timezone: (payload.timezone as string | undefined) ?? null,
+    cancelUrl: (payload.cancel_url as string | undefined) ?? null,
+    rescheduleUrl: (payload.reschedule_url as string | undefined) ?? null,
+    eventName: (scheduledEvent.name as string | undefined) ?? null,
+    location: meetingLocation,
   });
   if (result.status === "deduped") return NextResponse.json({ ok: true, deduped: true });
   if (result.status === "unresolved") {

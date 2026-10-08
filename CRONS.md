@@ -13,8 +13,8 @@ https://cron-job.org: create one job per row, method **GET**, URL `https://<your
 | `0 * * * *` | `/api/campaigns/send-daily-batch` |
 | `0 * * * *` | `/api/cron/voice-daily-call` |
 | `*/10 * * * *` | `/api/cron/sync-endpoints` |
-| `*/5 * * * *` | `/api/cron/domain-provisioning` |
-| `*/5 * * * *` | `/api/cron/calendly-sync` |
+| `*/15 * * * *` | `/api/cron/domain-provisioning` |
+| `*/30 * * * *` | `/api/cron/calendly-sync` |
 | `*/30 * * * *` | `/api/ads/sync` |
 | `*/5 * * * *` | `/api/cron/social-initial` |
 
