@@ -811,6 +811,20 @@ export async function POST(
       }
     }
 
+    // Meta (via Zernio) REJECTS ad creation outright when neither an image
+    // nor a video is attached — it is not optional, despite the comments
+    // above assuming a media-less ad could still publish (confirmed live:
+    // Zernio /ads/create 400 "imageUrl or video is required"). Catching this
+    // here, before the finance gate runs, turns a guaranteed downstream
+    // failure into one clear, actionable message instead of a raw API error.
+    if (!imageUrl && !imageHash && !videoUrl) {
+      throw new Error(
+        `This ad has no image or video attached, and Meta requires one for every ad.${
+          imageWarning ? ` ${imageWarning}` : ""
+        } Go back and either upload your own image/video, or resubmit — AI creative generation can be retried.`
+      );
+    }
+
     // ---- 6. Finance gate (still BEFORE any spend) ------------------------
     const { data: decision, error: decisionError } = await admin.rpc("decide_ad_finance", {
       p_client_id: client.id,
