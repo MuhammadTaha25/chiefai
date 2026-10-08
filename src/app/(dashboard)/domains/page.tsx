@@ -11,6 +11,7 @@ import DomainPurchaseHistory from "@/components/domain-purchase-history";
 import DomainLiveStatus from "@/components/domain-live-status";
 import DomainMailboxList from "@/components/domain-mailbox-list";
 import DomainMailboxAdd from "@/components/domain-mailbox-add";
+import DomainExternalSetup from "@/components/domain-external-setup";
 import { getMailboxReadiness } from "@/lib/mailgun";
 
 interface DomainPurchaseRow {
@@ -152,6 +153,8 @@ export default async function DomainsPage(props: {
       <DomainLiveStatus />
 
       <DomainPurchaseHistory purchases={purchases ?? []} />
+
+      <DomainExternalSetup />
 
       <DomainMailboxAdd domains={(ownedDomains ?? []).map((d) => d.domain)} />
 

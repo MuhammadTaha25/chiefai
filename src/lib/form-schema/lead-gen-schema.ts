@@ -3,7 +3,6 @@ import {
   INDUSTRY_OPTIONS,
   COUNTRY_OPTIONS,
   statesForCountries,
-  TECH_STACK_OPTIONS,
   contactPersonasForIndustry,
 } from "./industry-options";
 
@@ -279,35 +278,6 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
     ],
   },
   {
-    id: "technology",
-    title: "Technology",
-    intro: "Optional — only fill this in if the tools a company uses matter to you.",
-    fields: [
-      {
-        id: "tech_must_use",
-        label: "What tools or technology should they use?",
-        help: "Do you want companies that already use a certain software or technology?",
-        type: "multiselect",
-        options: TECH_STACK_OPTIONS,
-        allowCustom: true,
-      },
-      {
-        id: "tech_must_not_use",
-        label: "Technology they must NOT use",
-        help: "Any tools that would make them a bad fit.",
-        example: "Do not target companies using Salesforce.",
-        type: "tags",
-      },
-      {
-        id: "competitor_software",
-        label: "Competitor software",
-        help: "Would you like us to find businesses using a competitor's product? This can be a great source of leads ready to switch.",
-        type: "tags",
-        example: "HubSpot, Salesforce, Semrush, Monday.com…",
-      },
-    ],
-  },
-  {
     id: "contact",
     title: "Who Should We Contact?",
     intro: "Tell us which person at the company we should try to reach.",
@@ -328,13 +298,6 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
         type: "select",
         options: sameOpts(["Management", "Sales", "Marketing", "IT", "Engineering", "HR", "Finance", "Operations", "Product", "Customer Success"]),
         allowCustom: true,
-      },
-      {
-        id: "seniority",
-        label: "Seniority",
-        help: "How senior should the person be?",
-        type: "select",
-        options: sameOpts(["Owner", "C-Level", "VP", "Director", "Manager", "Team Lead", "Any seniority"]),
       },
     ],
   },
@@ -357,14 +320,6 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
         type: "multiselect",
         options: sameOpts(["Need more sales", "Need automation", "Need software", "Need employees", "Need marketing", "Outdated website", "High operating costs", "Need AI", "Need more customers"]),
         allowCustom: true,
-      },
-      {
-        id: "buying_signals",
-        label: "What signals should we look for?",
-        help: "Clues that a company is ready to buy right now.",
-        type: "multiselect",
-        options: sameOpts(["Hiring", "Growth", "Funding", "Expansion", "New product", "Technology change", "Recent company news", "Competitor usage", "Buying interest"]),
-        allowAI: true,
       },
       {
         id: "exclude_lead_types",
@@ -447,7 +402,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
         label: "How should we contact them?",
         help: "Which channel should we use to reach out to new leads?",
         type: "multiselect",
-        options: sameOpts(["Email", "LinkedIn"]),
+        options: sameOpts(["Email"]),
       },
       {
         id: "email_tone",

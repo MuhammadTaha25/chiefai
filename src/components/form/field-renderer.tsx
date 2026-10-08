@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { FieldConfig, FormValues, AI_DECIDE, NOT_SURE, OTHER } from "@/lib/form-schema/types";
+import { FieldConfig, FormValues, AI_DECIDE, NOT_SURE, OTHER, UploadedMedia } from "@/lib/form-schema/types";
 
 function resolveOptions(field: FieldConfig, values: FormValues) {
   const raw = typeof field.options === "function" ? field.options(values) : field.options ?? [];
@@ -43,6 +43,61 @@ export function FieldRenderer({
   // on every render — it was previously declared inside that branch, after
   // several early returns, which violates React's Rules of Hooks.
   const [draft, setDraft] = useState("");
+  // Only used by the "file" branch, same reason.
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  if (field.type === "file") {
+    const media = value as UploadedMedia | undefined;
+    async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file) return;
+      setUploading(true);
+      setUploadError(null);
+      try {
+        const body = new FormData();
+        body.append("file", file);
+        const res = await fetch(field.uploadUrl ?? "/api/ads/upload-media", { method: "POST", body });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Upload failed");
+        onChange(field.id, data as UploadedMedia);
+      } catch (err) {
+        setUploadError((err as Error).message);
+      } finally {
+        setUploading(false);
+      }
+    }
+    return (
+      <Wrapper field={field}>
+        {media ? (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 p-3 text-sm dark:border-zinc-800">
+            <div className="min-w-0">
+              <p className="truncate font-medium">{media.filename}</p>
+              <p className="text-xs text-zinc-500 capitalize">{media.mediaType} uploaded</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onChange(field.id, undefined)}
+              className="shrink-0 text-xs font-medium text-zinc-500 underline hover:text-zinc-800 dark:hover:text-zinc-200"
+            >
+              Remove
+            </button>
+          </div>
+        ) : (
+          <input
+            type="file"
+            accept={field.accept ?? "image/*,video/*"}
+            disabled={uploading}
+            onChange={handleFile}
+            className="w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-900 file:px-3.5 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-[#383838] disabled:opacity-50 dark:file:bg-white dark:file:text-black dark:hover:file:bg-[#ccc]"
+          />
+        )}
+        {uploading && <p className="mt-1.5 text-xs text-zinc-500">Uploading…</p>}
+        {uploadError && <p className="mt-1.5 text-xs text-red-600">{uploadError}</p>}
+      </Wrapper>
+    );
+  }
 
   if (field.type === "text" || field.type === "url") {
     return (

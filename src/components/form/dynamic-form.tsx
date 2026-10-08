@@ -42,6 +42,8 @@ export function DynamicForm({
   formId = "default",
   reviewTitle = "Here's what we'll look for",
   reviewNote = "Review the plan below. Submitting only finds and saves leads — no emails are sent. You will draft, review and send each email yourself from the Leads page.",
+  initialValues,
+  initialReviewing = false,
 }: {
   sections: SectionConfig[];
   title: string;
@@ -52,15 +54,20 @@ export function DynamicForm({
   /** Heading + explanation shown on the final review step. Defaults match the lead-gen form. */
   reviewTitle?: string;
   reviewNote?: string;
+  /** Pre-fills the form (e.g. reopening a previously submitted brief for editing). Ignored once a sessionStorage draft exists for this formId. */
+  initialValues?: FormValues;
+  /** Skip straight to the review step with initialValues already filled in. */
+  initialReviewing?: boolean;
 }) {
   // Lazy initializers run once on mount, before the first paint — this is
   // what makes returning to the page show restored progress instead of a
   // flash of step 1 followed by a jump to the real step.
   const [step, setStep] = useState(() => loadDraft(formId)?.step ?? 0);
-  const [reviewing, setReviewing] = useState(() => loadDraft(formId)?.reviewing ?? false);
-  const [values, setValues] = useState<FormValues>(() => loadDraft(formId)?.values ?? {});
+  const [reviewing, setReviewing] = useState(() => loadDraft(formId)?.reviewing ?? initialReviewing);
+  const [values, setValues] = useState<FormValues>(() => loadDraft(formId)?.values ?? initialValues ?? {});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
 
   useEffect(() => {
     try {
@@ -139,6 +146,26 @@ export function DynamicForm({
           </ul>
         </div>
 
+        <label className="mt-5 flex items-start gap-2.5 text-sm text-zinc-600 dark:text-zinc-400">
+          <input
+            type="checkbox"
+            checked={agreedToTerms}
+            onChange={(e) => setAgreedToTerms(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-zinc-300 dark:border-zinc-700"
+          />
+          <span>
+            I agree to the{" "}
+            <a href="/terms" target="_blank" rel="noopener noreferrer" className="font-medium underline">
+              Terms and Conditions
+            </a>{" "}
+            and{" "}
+            <a href="/privacy" target="_blank" rel="noopener noreferrer" className="font-medium underline">
+              Privacy Policy
+            </a>
+            .
+          </span>
+        </label>
+
         {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
         <div className="mt-6 flex justify-between">
@@ -152,7 +179,7 @@ export function DynamicForm({
           <button
             type="button"
             onClick={handleFinalSubmit}
-            disabled={loading}
+            disabled={loading || !agreedToTerms}
             className="rounded-full bg-foreground px-5 py-2.5 text-sm font-medium text-background hover:bg-[#383838] disabled:opacity-50 dark:hover:bg-[#ccc]"
           >
             {loading ? "Submitting…" : submitLabel}

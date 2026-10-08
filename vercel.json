@@ -1,1 +1,12 @@
-{}
+{
+  "crons": [
+    { "path": "/api/cron/follow-ups", "schedule": "0 * * * *" },
+    { "path": "/api/cron/domain-provisioning", "schedule": "*/15 * * * *" },
+    { "path": "/api/cron/social-content/post", "schedule": "*/30 * * * *" },
+    { "path": "/api/cron/social-content/story", "schedule": "*/30 * * * *" },
+    { "path": "/api/cron/social-initial", "schedule": "*/10 * * * *" },
+    { "path": "/api/cron/sync-endpoints", "schedule": "0 */6 * * *" },
+    { "path": "/api/cron/voice-daily-call", "schedule": "0 9 * * *" },
+    { "path": "/api/cron/calendly-sync", "schedule": "*/30 * * * *" }
+  ]
+}

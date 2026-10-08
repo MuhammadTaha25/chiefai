@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveClientByCalledNumber } from "@/lib/voice/provision";
@@ -28,6 +29,21 @@ const SHARED_SECRET = process.env.VOICE_FACTS_SECRET ?? process.env.N8N_WEBHOOK_
 const MISSING_TABLE_HINT =
   "Call recording is not available yet — run supabase/add_voice_agent.sql in the Supabase SQL editor to add the call columns.";
 
+/**
+ * Constant-time secret comparison. A plain `===` leaks timing information
+ * proportional to how many leading bytes match, which is enough signal for
+ * an attacker to brute-force the secret byte-by-byte over many requests.
+ * `crypto.timingSafeEqual` requires equal-length buffers, so length is
+ * checked first (a length mismatch is not itself secret — the secret's
+ * length is fixed and not attacker-discoverable from this check alone).
+ */
+function timingSafeEqualStrings(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
 const str = (v: unknown): string | null => {
   if (typeof v === "string" && v.trim()) return v.trim();
   if (typeof v === "number") return String(v);
@@ -39,7 +55,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Voice webhook is not configured" }, { status: 503 });
   }
   const presented = req.headers.get("x-voice-secret") ?? req.headers.get("x-webhook-secret");
-  if (presented !== SHARED_SECRET) {
+  if (!presented || !timingSafeEqualStrings(presented, SHARED_SECRET)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

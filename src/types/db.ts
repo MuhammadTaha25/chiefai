@@ -127,6 +127,8 @@ export interface AdCampaign {
     previews?: { format: string; src: string }[];
     /** Zernio's ad document id — what the preview endpoint takes. */
     zernio_ad_id?: string | null;
+    /** The raw form answers this campaign was built from — lets "Edit" reopen the brief form pre-filled. */
+    raw_brief?: Record<string, unknown> | null;
   } | null;
   reach_estimate?: { lower?: number | null; upper?: number | null } | null;
 }

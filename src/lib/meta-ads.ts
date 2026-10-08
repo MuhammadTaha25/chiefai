@@ -335,6 +335,8 @@ export interface AdBriefInput {
   creative_focus?: string;
   ad_format?: string;
   has_creative_assets?: string;
+  /** Set when the user uploaded their own creative instead of asking us to generate one. */
+  creative_media?: { url?: string; mediaType?: "image" | "video"; filename?: string } | null;
   main_message?: string;
   ad_cta?: string;
   landing_destination?: string;

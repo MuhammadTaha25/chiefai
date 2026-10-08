@@ -742,13 +742,22 @@ export async function POST(
       );
     }
 
-    // ---- 5. Creative: AI video (Veo) or AI image, from the same pain point -
+    // ---- 5. Creative: the user's own upload, or AI video (Veo) / AI image --
     let imageUrl: string | null = null;
     let imageHash: string | null = null;
     let videoUrl: string | null = null;
     let imageWarning: string | null = null;
     let creativeFallback: string | null = null;
-    if (plan.creativeFormat === "video") {
+    const uploadedMedia = brief.creative_media;
+    const usingUploadedMedia = Boolean(uploadedMedia?.url);
+    if (usingUploadedMedia && uploadedMedia?.mediaType === "video") {
+      // User-supplied media is already a public URL (see /api/ads/upload-media),
+      // so it is handed to Meta directly — no AI generation, no re-upload.
+      videoUrl = uploadedMedia.url as string;
+    } else if (usingUploadedMedia && uploadedMedia?.mediaType === "image") {
+      imageUrl = uploadedMedia.url as string;
+    }
+    if (!usingUploadedMedia && plan.creativeFormat === "video") {
       try {
         const vid = await generateAdVideo({
           // Reuse the copywriter's pain-point scene, which already describes the
@@ -773,7 +782,7 @@ export async function POST(
       }
     }
 
-    if (plan.creativeFormat === "image" || (plan.creativeFormat === "video" && !videoUrl)) {
+    if (!usingUploadedMedia && (plan.creativeFormat === "image" || (plan.creativeFormat === "video" && !videoUrl))) {
       try {
         const img = await generateAdImage({
           imagePrompt: creative.image_prompt || creative.creative_concept,
@@ -957,11 +966,13 @@ export async function POST(
     const notes = [
       plan.objective.rationale,
       plan.creativesNote,
-      videoUrl
-        ? `Creative: ${plan.creativeAspect} AI video (Veo), attached to the ad.`
-        : imageUrl || imageHash
-          ? `Creative: AI-generated ${plan.creativeAspect} image, attached to the ad.`
-          : "Creative: no media could be attached — add one in Meta Ads Manager.",
+      usingUploadedMedia
+        ? `Creative: your uploaded ${uploadedMedia?.mediaType} (${uploadedMedia?.filename}), attached to the ad.`
+        : videoUrl
+          ? `Creative: ${plan.creativeAspect} AI video (Veo), attached to the ad.`
+          : imageUrl || imageHash
+            ? `Creative: AI-generated ${plan.creativeAspect} image, attached to the ad.`
+            : "Creative: no media could be attached — add one in Meta Ads Manager.",
       ...targetingNotes,
       // Meta charges the budget in the ad account's own currency, which is NOT
       // always what the user typed it in — say so explicitly.
@@ -1053,6 +1064,9 @@ export async function POST(
         // re-querying Meta.
         previews,
         zernio_ad_id: ad.zernioAdId ?? null,
+        // Kept so an existing campaign can be reopened in the brief form,
+        // pre-filled, for editing (see the "Edit" action on the Ads page).
+        raw_brief: brief,
       },
       error_message: notes.join(" "),
       // NOT launched yet — this is the draft the user reviews. launched_at is

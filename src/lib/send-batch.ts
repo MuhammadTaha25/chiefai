@@ -7,12 +7,12 @@ import { buildTemplateEmail } from "@/lib/outreach-template";
 import { cleanOutreachEmail, lintOutreachEmail } from "@/lib/email-quality";
 import { sendMail, mailgunDomainForAddress, getMailboxReadiness } from "@/lib/mailgun";
 import { withUnsubscribeFooter, unsubscribeHeaders } from "@/lib/compliance";
+import { resolveFirstFollowUpDelayMs } from "@/lib/follow-up-config";
 
 const DAILY_INITIAL_SEND_LIMIT = 4;
-// First follow-up check happens 1 hour after the initial send (spec §17) —
-// distinct from the older manual "Find leads" flow's 3-day interval, which
-// is a separate feature this route doesn't touch.
-const FIRST_FOLLOW_UP_DELAY_MS = 60 * 60 * 1000;
+// The delay before the first follow-up check comes from follow-up-config.ts
+// (client-configurable via criteria.follow_up_delay_days, default 3 days) —
+// shared with follow-ups.ts so the two can never silently diverge.
 // Spread sends out instead of firing all four back-to-back (spec §12).
 // Configurable — defaults keep a manual/test run's total wall-clock time
 // reasonable; a real production cron can widen this via env vars.
@@ -226,7 +226,7 @@ export async function sendBatchForClient(clientId: string) {
             status: "email_sent",
             follow_up_number: 1,
             last_contact_at: new Date().toISOString(),
-            next_follow_up_at: new Date(Date.now() + FIRST_FOLLOW_UP_DELAY_MS).toISOString(),
+            next_follow_up_at: new Date(Date.now() + resolveFirstFollowUpDelayMs(job?.criteria)).toISOString(),
           })
           .eq("id", lead.id),
       ]);

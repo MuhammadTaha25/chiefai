@@ -242,6 +242,14 @@ export const ADS_SCHEMA: SectionConfig[] = [
         type: "yesno",
       },
       {
+        id: "creative_media",
+        label: "Upload your image or video",
+        help: "We'll use this exact file in your ad instead of generating one. Images up to 10 MB, video up to 300 MB.",
+        type: "file",
+        accept: "image/*,video/*",
+        showIf: (v) => v.has_creative_assets === "yes",
+      },
+      {
         id: "main_message",
         label: "Main message",
         help: "The single most important thing you want the ad to say.",

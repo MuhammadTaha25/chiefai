@@ -7,7 +7,15 @@ export type FieldType =
   | "multiselect"
   | "tags"
   | "date"
-  | "yesno";
+  | "yesno"
+  | "file";
+
+/** Value stored for a "file" field once the upload completes. */
+export interface UploadedMedia {
+  url: string;
+  mediaType: "image" | "video";
+  filename: string;
+}
 
 export interface FieldOption {
   value: string;
@@ -40,6 +48,10 @@ export interface FieldConfig {
   max?: number;
   /** Render two fields side-by-side (used for from/to number ranges). */
   pairWith?: string;
+  /** "file" fields only: passed to the <input accept> attribute. */
+  accept?: string;
+  /** "file" fields only: where to POST the file; must return UploadedMedia JSON. */
+  uploadUrl?: string;
 }
 
 export interface SectionConfig {

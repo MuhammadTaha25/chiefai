@@ -430,6 +430,111 @@ function PreviewPanel({
   );
 }
 
+/**
+ * Reopens an existing campaign's brief, pre-filled, so the user can change the
+ * copy, targeting or creative (including swapping in a new upload) and submit
+ * it as a new paused draft version — same regenerate_of path "Regenerate
+ * creative" already uses, except the user can actually edit the answers first.
+ *
+ * This never touches the original campaign on Meta: a live ad keeps running
+ * and spending until the user publishes the new draft and discards the old
+ * one themselves (there is no proven Meta "update creative on a live ad" call
+ * in this codebase, so editing always goes through a fresh reviewable draft
+ * instead of guessing at one).
+ */
+function EditCampaignForm({
+  campaign,
+  platform,
+  platformLabel,
+  onDone,
+}: {
+  campaign: AdCampaign;
+  platform: string;
+  platformLabel: string;
+  onDone: () => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [issues, setIssues] = useState<AdIssue[]>([]);
+  const [result, setResult] = useState<LaunchResult | null>(null);
+  const rawBrief = (campaign.launch_payload?.raw_brief as FormValues | undefined) ?? {};
+
+  async function handleSubmit(values: FormValues) {
+    setError(null);
+    setIssues([]);
+    const local = validateAdBrief({ ...values, daily_budget: Number(values.daily_budget) || 0 } as never);
+    if (errorsOf(local).length > 0) {
+      setIssues(local);
+      setError("Fix the problems listed above, then submit again.");
+      throw new Error("Fix the problems listed above, then submit again.");
+    }
+    const res = await fetch(`/api/ads/${platform}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...values, daily_budget: Number(values.daily_budget) || 0, regenerate_of: campaign.id }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (Array.isArray(data.issues)) setIssues(data.issues);
+      setError(data.error || "Failed to submit the edited brief");
+      throw new Error(data.error || "Failed to submit the edited brief");
+    }
+    setResult(data as LaunchResult);
+  }
+
+  if (result) {
+    return (
+      <div className="mt-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+        <PreviewPanel result={result} onDone={onDone} />
+        <button
+          type="button"
+          onClick={onDone}
+          className="mt-3 w-full rounded-md border border-zinc-200 px-3 py-1.5 text-xs font-medium dark:border-zinc-800"
+        >
+          Close
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+      <p className="mb-3 text-xs text-zinc-500">
+        Editing creates a NEW paused draft with your changes — the original campaign is untouched (if it&apos;s live, it
+        keeps running and spending until you publish this draft and discard the old one yourself).
+      </p>
+      {error && <p className="mb-3 text-xs text-red-600">{error}</p>}
+      {issues.length > 0 && (
+        <ul className="mb-3 space-y-1 rounded-md border border-red-200 bg-red-50 p-3 text-xs dark:border-red-900 dark:bg-red-950">
+          {issues.map((i, n) => (
+            <li key={n} className={i.severity === "error" ? "text-red-700 dark:text-red-300" : "text-amber-700 dark:text-amber-400"}>
+              {i.severity === "error" ? "✕" : "⚠"} {i.message}
+            </li>
+          ))}
+        </ul>
+      )}
+      <DynamicForm
+        sections={ADS_SCHEMA}
+        title="Change whatever you need, then submit to build the new version."
+        buildRecommendation={buildAdsRecommendation}
+        onSubmit={handleSubmit}
+        submitLabel="Save as new draft"
+        formId={`ads-edit-${campaign.id}`}
+        initialValues={rawBrief}
+        initialReviewing
+        reviewTitle="Here's the updated ad"
+        reviewNote={`Review your changes below. On submit we rebuild the campaign, ad set and ad on ${platformLabel} as a NEW paused draft — nothing is spent until you publish it.`}
+      />
+      <button
+        type="button"
+        onClick={onDone}
+        className="mt-4 w-full rounded-md border border-zinc-200 px-3 py-1.5 text-xs font-medium dark:border-zinc-800"
+      >
+        Cancel
+      </button>
+    </div>
+  );
+}
+
 function BriefForm({
   platform,
   platformLabel,
@@ -618,6 +723,7 @@ export default function AdsPanel({
   const router = useRouter();
   const searchParams = useSearchParams();
   const zernioError = searchParams.get("zernio_error");
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   return (
     <div>
@@ -773,6 +879,26 @@ export default function AdsPanel({
                             ))}
                           </ul>
                         ) : null}
+                        {c.launch_payload?.raw_brief && c.status !== "error" && (
+                          <button
+                            type="button"
+                            onClick={() => setEditingId(editingId === c.id ? null : c.id)}
+                            className="mt-2 w-full rounded-md border border-zinc-200 py-1 text-[11px] font-medium dark:border-zinc-800"
+                          >
+                            {editingId === c.id ? "Close edit" : "Edit"}
+                          </button>
+                        )}
+                        {editingId === c.id && (
+                          <EditCampaignForm
+                            campaign={c}
+                            platform={p.key}
+                            platformLabel={p.label}
+                            onDone={() => {
+                              setEditingId(null);
+                              router.refresh();
+                            }}
+                          />
+                        )}
                       </div>
                     );
                   })}

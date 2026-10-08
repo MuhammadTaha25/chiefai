@@ -18,12 +18,26 @@ export async function ensureDomainProvisioned(
   admin: SupabaseClient,
   params: { clientId: string; domain: string; publicOrigin: string; verifyAttempts?: number }
 ): Promise<ProvisionResult> {
+  // A domain the client brought themselves (DNS hosted at their own
+  // registrar, not in our Hostinger account) can never be written to via
+  // Hostinger's zone API — that call would just 404 against a zone that
+  // isn't ours. Skip the write/DMARC steps for it; Mailgun's own verify is
+  // ground truth either way, so this never reports "active" on records that
+  // were never actually added.
+  const { data: domainRow } = await admin
+    .from("domains")
+    .select("dns_managed_externally")
+    .eq("client_id", params.clientId)
+    .eq("domain", params.domain)
+    .maybeSingle<{ dns_managed_externally: boolean | null }>();
+  const external = domainRow?.dns_managed_externally === true;
+
   const result = await provisionDomain(
     {
       createMailgunDomain,
       getMailgunDnsRecords,
-      writeDns: provisionMailgunDnsRecords,
-      ensureDmarc: ensureDmarcRecord,
+      writeDns: external ? async () => ({ allConfirmed: true, failures: [] }) : provisionMailgunDnsRecords,
+      ensureDmarc: external ? undefined : ensureDmarcRecord,
       verifyMailgunDomain,
       createInboundRoute: (url) => createInboundRoute("", url),
       registerTrackingWebhooks,

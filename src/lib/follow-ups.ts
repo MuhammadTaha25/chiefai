@@ -6,10 +6,13 @@ import { withUnsubscribeFooter, unsubscribeHeaders } from "@/lib/compliance";
 import { draftFollowUpEmail } from "@/lib/gemini";
 import { cleanOutreachEmail } from "@/lib/email-quality";
 import { FORM_LEAD_SOURCE, autoSendSince } from "@/lib/campaign";
+import { resolveFollowUpIntervalMs } from "@/lib/follow-up-config";
 
-// Spec: exactly 1 hour between stages, immediately re-checking latest state
-// before each follow-up — see the atomic claim below, not just this delay.
-const FOLLOW_UP_INTERVAL_MS = 60 * 60 * 1000;
+// Cadence between stages comes from follow-up-config.ts (client-configurable
+// via criteria.follow_up_delay_days, default 3 days) — shared with
+// send-batch.ts so the two can never silently diverge. The atomic claim below
+// still re-checks latest state immediately before each follow-up, regardless
+// of how long the interval itself is.
 // Hard system ceiling — never exceeded regardless of any client-configured
 // follow-up count (maxFollowUpsFor below can only make this stricter).
 const HARD_MAX_FOLLOW_UPS = 3;
@@ -195,7 +198,9 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
             follow_up_number: nextFollowUpNumber,
             last_contact_at: new Date().toISOString(),
             next_follow_up_at:
-              nextFollowUpNumber >= maxFollowUps ? null : new Date(Date.now() + FOLLOW_UP_INTERVAL_MS).toISOString(),
+              nextFollowUpNumber >= maxFollowUps
+                ? null
+                : new Date(Date.now() + resolveFollowUpIntervalMs(job?.criteria)).toISOString(),
           })
           .eq("id", lead.id),
       ]);
