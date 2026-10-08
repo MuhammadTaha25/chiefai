@@ -8,6 +8,27 @@ import {
 } from "../ad-validation.ts";
 import { COUNTRY_OPTIONS, statesForCountries, interestsForIndustry } from "./industry-options";
 
+/**
+ * Builds the ads brief schema locked to a single platform. The "where do you
+ * want to advertise" multiselect used to list Facebook + Instagram regardless
+ * of which connected account (Facebook Ads card vs Instagram Ads card) the
+ * brief was opened from — confusing, since this app launches each card's ad
+ * only on that card's own connection. Each card now only ever offers its own
+ * platform here (still a required tap-to-confirm chip, not auto-selected).
+ */
+export function buildAdsSchema(lockedPlatform: "Facebook" | "Instagram"): SectionConfig[] {
+  return ADS_SCHEMA.map((section) =>
+    section.id !== "platforms"
+      ? section
+      : {
+          ...section,
+          fields: section.fields.map((field) =>
+            field.id !== "platforms" ? field : { ...field, options: sameOpts([lockedPlatform]) }
+          ),
+        }
+  );
+}
+
 export const ADS_SCHEMA: SectionConfig[] = [
   {
     id: "business_offer",

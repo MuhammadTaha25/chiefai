@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { DynamicForm } from "@/components/form/dynamic-form";
-import { ADS_SCHEMA } from "@/lib/form-schema/ads-schema";
+import { buildAdsSchema } from "@/lib/form-schema/ads-schema";
 import { buildAdsRecommendation } from "@/lib/form-schema/recommendation";
 import { FormValues } from "@/lib/form-schema/types";
 import { errorsOf, friendlyAdError, validateAdBrief, type AdIssue } from "@/lib/ad-validation";
@@ -513,7 +513,7 @@ function EditCampaignForm({
         </ul>
       )}
       <DynamicForm
-        sections={ADS_SCHEMA}
+        sections={buildAdsSchema(platform === "meta_ads" ? "Facebook" : "Instagram")}
         title="Change whatever you need, then submit to build the new version."
         buildRecommendation={buildAdsRecommendation}
         onSubmit={handleSubmit}
@@ -685,7 +685,7 @@ function BriefForm({
         </div>
       )}
       <DynamicForm
-        sections={ADS_SCHEMA}
+        sections={buildAdsSchema(platform === "meta_ads" ? "Facebook" : "Instagram")}
         title="Answer in plain English — no marketing jargon needed."
         buildRecommendation={buildAdsRecommendation}
         onSubmit={handleSubmit}
