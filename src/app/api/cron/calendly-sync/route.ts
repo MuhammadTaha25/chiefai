@@ -73,10 +73,13 @@ async function run(req: NextRequest) {
   // a schedule, so it doubles as the retry mechanism. Only the SPECIFIC
   // notification(s) still marked failed are re-sent; one already "sent" is
   // never touched, so no duplicate email can result from a retry.
+  // 'permanently_failed' never matches `eq.failed`, so once a notification
+  // hits MAX_NOTIFICATION_ATTEMPTS (see sendBookingNotifications) the sweep
+  // naturally stops picking it up — no separate cap-tracking needed here.
   let bq = admin
     .from("bookings")
     .select(
-      "calendly_event_id, client_id, lead_id, invitee_email, invitee_name, invitee_timezone, meeting_location, cancel_url, reschedule_url, event_name, meeting_topic, scheduled_at, meeting_duration, client_notification_status, customer_notification_status"
+      "calendly_event_id, client_id, lead_id, invitee_email, invitee_name, invitee_timezone, meeting_location, cancel_url, reschedule_url, event_name, meeting_topic, scheduled_at, meeting_duration, client_notification_status, customer_notification_status, client_notification_attempts, customer_notification_attempts"
     )
     .eq("booking_status", "scheduled")
     .or("client_notification_status.eq.failed,customer_notification_status.eq.failed");
@@ -101,10 +104,21 @@ async function run(req: NextRequest) {
       eventName: row.event_name,
       meetingTopic: row.meeting_topic,
     };
-    await sendBookingNotifications(admin, row.client_id, row.lead_id, row.calendly_event_id, context, {
-      client: row.client_notification_status === "failed",
-      customer: row.customer_notification_status === "failed",
-    });
+    await sendBookingNotifications(
+      admin,
+      row.client_id,
+      row.lead_id,
+      row.calendly_event_id,
+      context,
+      {
+        client: row.client_notification_status === "failed",
+        customer: row.customer_notification_status === "failed",
+      },
+      {
+        client: row.client_notification_attempts ?? 0,
+        customer: row.customer_notification_attempts ?? 0,
+      }
+    );
     retried++;
   }
 

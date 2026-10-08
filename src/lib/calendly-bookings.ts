@@ -2,19 +2,26 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { notifyClientOfBooking, notifyCustomerOfBooking, type BookingContext } from "@/lib/booking-notification";
 import { logEvent } from "@/lib/log-event";
 
+/** After this many failed attempts a notification is marked `permanently_failed` and the retry sweep stops picking it up — the booking itself is never affected either way. */
+const MAX_NOTIFICATION_ATTEMPTS = 5;
+
 /**
  * Sends whichever of the two booking notifications are asked for and writes
- * their outcome onto the booking row. Used both right after a booking is
- * first recorded (both notifications requested) and by the retry sweep in
- * the Calendly polling cron (only the ones still `failed`/`pending`
- * requested) — the same function either way, so a retry can never diverge
- * from the original send logic.
+ * their outcome (status + attempt count) onto the booking row. Used both
+ * right after a booking is first recorded (both notifications requested,
+ * starting attempts at 0) and by the retry sweep in the Calendly polling
+ * cron (only the ones still `failed` requested, starting from their current
+ * attempt count) — the same function either way, so a retry can never
+ * diverge from the original send logic.
  *
- * A notification failing must never un-confirm a real booking: the booking
- * row itself is never touched by this function beyond the two status
- * columns, and the status UPDATE's own error is logged (not swallowed) so a
- * transient DB failure here shows up instead of silently leaving a `sent`
- * email recorded as "pending" forever.
+ * Client and customer notifications are fully independent: each has its own
+ * status and attempt counter, so a permanently-failing customer email can
+ * never stop the client notification from being sent/retried, and vice
+ * versa. A notification failing (even permanently) must never un-confirm a
+ * real booking: the booking row itself is never touched by this function
+ * beyond these columns, and the status UPDATE's own error is logged (not
+ * swallowed) so a transient DB failure here shows up instead of silently
+ * leaving a `sent` email recorded as something else.
  */
 export async function sendBookingNotifications(
   admin: SupabaseClient,
@@ -22,11 +29,12 @@ export async function sendBookingNotifications(
   leadId: string,
   inviteeUri: string,
   bookingContext: BookingContext,
-  which: { client: boolean; customer: boolean }
+  which: { client: boolean; customer: boolean },
+  priorAttempts: { client: number; customer: number } = { client: 0, customer: 0 }
 ): Promise<{ clientSent: boolean | null; customerSent: boolean | null }> {
   let clientSent: boolean | null = null;
   let customerSent: boolean | null = null;
-  const statusUpdate: Record<string, string> = {};
+  const statusUpdate: Record<string, string | number> = {};
 
   if (which.client) {
     const note = await notifyClientOfBooking(admin, clientId, leadId, bookingContext).catch((e) => ({
@@ -34,10 +42,18 @@ export async function sendBookingNotifications(
       reason: (e as Error).message,
     }));
     clientSent = note.sent;
-    statusUpdate.client_notification_status = note.sent ? "sent" : "failed";
-    if (!note.sent) {
+    const attempts = priorAttempts.client + 1;
+    statusUpdate.client_notification_attempts = attempts;
+    if (note.sent) {
+      statusUpdate.client_notification_status = "sent";
+    } else if (attempts >= MAX_NOTIFICATION_ATTEMPTS) {
+      statusUpdate.client_notification_status = "permanently_failed";
       // eslint-disable-next-line no-console
-      console.error(`Client booking notification not sent for client ${clientId}: ${note.reason}`);
+      console.error(`Client booking notification permanently failed for client ${clientId} after ${attempts} attempts: ${note.reason}`);
+    } else {
+      statusUpdate.client_notification_status = "failed";
+      // eslint-disable-next-line no-console
+      console.error(`Client booking notification not sent (attempt ${attempts}/${MAX_NOTIFICATION_ATTEMPTS}) for client ${clientId}: ${note.reason}`);
     }
   }
 
@@ -47,10 +63,18 @@ export async function sendBookingNotifications(
       reason: (e as Error).message,
     }));
     customerSent = note.sent;
-    statusUpdate.customer_notification_status = note.sent ? "sent" : "failed";
-    if (!note.sent) {
+    const attempts = priorAttempts.customer + 1;
+    statusUpdate.customer_notification_attempts = attempts;
+    if (note.sent) {
+      statusUpdate.customer_notification_status = "sent";
+    } else if (attempts >= MAX_NOTIFICATION_ATTEMPTS) {
+      statusUpdate.customer_notification_status = "permanently_failed";
       // eslint-disable-next-line no-console
-      console.error(`Customer booking confirmation not sent for client ${clientId}: ${note.reason}`);
+      console.error(`Customer booking confirmation permanently failed for client ${clientId} after ${attempts} attempts: ${note.reason}`);
+    } else {
+      statusUpdate.customer_notification_status = "failed";
+      // eslint-disable-next-line no-console
+      console.error(`Customer booking confirmation not sent (attempt ${attempts}/${MAX_NOTIFICATION_ATTEMPTS}) for client ${clientId}: ${note.reason}`);
     }
   }
 
@@ -109,6 +133,10 @@ export async function recordInviteeBooking(
   // leads already marked booked (their story is closed) and pick the one
   // with the most recent outreach/reply ACTIVITY — the lead this prospect
   // was actually just talking to.
+  // A tie on last_contact_at (including two leads that were never contacted,
+  // both NULL) must never fall back to undefined database row order — `id`
+  // is added as a second, stable sort key purely to make the pick
+  // deterministic, not because lead id order means anything on its own.
   const { data: lead } = await admin
     .from("leads")
     .select("id, campaign_id, meeting_topic")
@@ -116,6 +144,7 @@ export async function recordInviteeBooking(
     .eq("email", email)
     .eq("booked", false)
     .order("last_contact_at", { ascending: false, nullsFirst: false })
+    .order("id", { ascending: true })
     .limit(1)
     .maybeSingle<{ id: string; campaign_id: string | null; meeting_topic: string | null }>();
   if (!lead) return { status: "unresolved", reason: "no matching lead" };
