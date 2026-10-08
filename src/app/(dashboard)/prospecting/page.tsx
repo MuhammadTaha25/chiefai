@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
+import { formatLocalDateTime } from "@/lib/format-date";
 
 interface LeadGenJob {
   id: string;
@@ -64,7 +65,7 @@ export default async function ProspectingPage() {
               const status = STATUS_LABEL[job.status] ?? { label: job.status, color: "text-zinc-500" };
               return (
                 <tr key={job.id} className="border-b border-black/[.06] last:border-0 dark:border-white/[.08]">
-                  <td className="px-4 py-3 text-zinc-500">{new Date(job.created_at).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-zinc-500">{formatLocalDateTime(job.created_at)}</td>
                   <td className="px-4 py-3 max-w-md truncate" title={job.criteria.what_you_sell}>
                     {job.criteria.ai_analysis?.summary || job.criteria.what_you_sell || "—"}
                   </td>

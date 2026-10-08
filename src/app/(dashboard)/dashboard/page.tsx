@@ -3,6 +3,7 @@ import StatCard from "@/components/stat-card";
 import AskCompany from "@/components/ask-company";
 import OutreachPipeline from "@/components/outreach-pipeline";
 import { getOutreachStatus } from "@/lib/outreach-status";
+import { formatLocalDateTime } from "@/lib/format-date";
 
 interface AdFinanceDecisionRow {
   decision: string;
@@ -320,7 +321,7 @@ export default async function DashboardPage() {
                   <td className="px-4 py-3">{j.recommended_action || "—"}</td>
                   <td className="px-4 py-3">{j.previous_job_id ? "Revision" : "Original"}</td>
                   <td className="px-4 py-3 text-zinc-500">
-                    {j.audited_at ? new Date(j.audited_at).toLocaleString() : "—"}
+                    {j.audited_at ? formatLocalDateTime(j.audited_at) : "—"}
                   </td>
                 </tr>
               ))}

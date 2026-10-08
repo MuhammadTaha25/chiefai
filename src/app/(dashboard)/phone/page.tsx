@@ -5,6 +5,7 @@ import { getCallSettings, type CallSettings } from "@/lib/voice/call-settings";
 import VoiceNumberPanel from "@/components/voice-number-panel";
 import { getPinHash } from "@/lib/voice/pin";
 import CallSettingsPanel from "@/components/call-settings-panel";
+import { formatLocalDateTime } from "@/lib/format-date";
 
 /**
  * The phone page: buy the number the world calls, and tell the agent which of
@@ -107,7 +108,7 @@ export default async function PhonePage() {
             <tbody>
               {calls.map((c) => (
                 <tr key={c.id} className="border-b border-black/[.06] last:border-0 dark:border-white/[.08]">
-                  <td className="px-4 py-3 text-zinc-500">{new Date(c.created_at).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-zinc-500">{formatLocalDateTime(c.created_at)}</td>
                   <td className="px-4 py-3 capitalize">{c.direction ?? "—"}</td>
                   <td className="px-4 py-3">{c.duration_seconds != null ? `${c.duration_seconds}s` : "—"}</td>
                   <td className="px-4 py-3 text-zinc-500">{c.transcript ? `${c.transcript.slice(0, 60)}…` : "—"}</td>

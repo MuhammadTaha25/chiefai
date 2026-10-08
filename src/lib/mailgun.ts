@@ -254,11 +254,20 @@ export async function registerTrackingWebhooks(domain: string, webhookUrl: strin
 export async function createInboundRoute(_address: string, webhookUrl: string) {
   const list = await fetch(`${MAILGUN_API_BASE_URL}/routes?limit=100`, { headers: { Authorization: authHeader() } });
   if (list.ok) {
-    const data = (await list.json()) as { items?: { expression: string; actions: string[] }[] };
-    const exists = (data.items ?? []).some(
-      (r) => r.expression.includes("catch_all") && r.actions.some((act) => act.includes(webhookUrl))
-    );
-    if (exists) return { message: "catch-all route already present" };
+    const data = (await list.json()) as { items?: { id: string; expression: string; actions: string[] }[] };
+    const catchAlls = (data.items ?? []).filter((r) => r.expression.includes("catch_all"));
+    const current = catchAlls.filter((r) => r.actions.some((act) => act.includes(webhookUrl)));
+    // Stale catch-alls (old tunnel URLs, pre-launch test routes) swallow mail
+    // before it ever reaches the current webhook, and each one also eats into
+    // the 5-route plan cap — remove every catch-all that isn't pointed here.
+    const stale = catchAlls.filter((r) => !r.actions.some((act) => act.includes(webhookUrl)));
+    for (const route of stale) {
+      await fetch(`${MAILGUN_API_BASE_URL}/routes/${route.id}`, {
+        method: "DELETE",
+        headers: { Authorization: authHeader() },
+      }).catch(() => {});
+    }
+    if (current.length > 0) return { message: "catch-all route already present", removedStale: stale.length };
   }
   const body = new URLSearchParams();
   body.set("priority", "0");

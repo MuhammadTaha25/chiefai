@@ -155,7 +155,7 @@ Numbers whose `elevenlabs_phone_number_id` is a real `phnum_…` are **skipped**
 those were deliberately imported into ElevenLabs and re-pointing them would take
 them away from that agent.
 
-It runs on a schedule (see `vercel.json`), and locally:
+It runs on a schedule (see `CRONS.md` — an external scheduler calls it, `vercel.json` itself declares no crons), and locally:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\dev-tunnel.ps1
@@ -171,7 +171,7 @@ Self-healing covers drift, but if you want an origin that **never changes**:
 | Option | What it needs | Survives the PC being off |
 |---|---|---|
 | **Cloudflare named tunnel** | a Cloudflare account, a domain on it, and `cloudflared tunnel login` — then `cloudflared tunnel create infomist` + a DNS route. Gives `https://voice.yourdomain.com` forever. | No — the tunnel still forwards to your machine |
-| **Deploy the app (Vercel)** | a Vercel account; the project already has `vercel.json` with all the crons. Gives `<project>.vercel.app` (or your domain). | **Yes** |
+| **Deploy the app (Vercel)** | a Vercel account, plus a free external scheduler (cron-job.org — see `CRONS.md`) to actually trigger the cron routes. Gives `<project>.vercel.app` (or your domain). | **Yes** |
 | **ngrok reserved domain** | an ngrok account and its authtoken (`ngrok config add-authtoken …`) | No |
 
 None of these can be set up without an account of your own — which is why the
