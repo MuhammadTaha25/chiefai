@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentClient } from "@/lib/get-current-client";
 import { getFreshCalendlyToken, listRecentInvitees } from "@/lib/calendly";
-import { recordInviteeBooking } from "@/lib/calendly-bookings";
+import { recordInviteeBooking, sendBookingNotifications } from "@/lib/calendly-bookings";
+import type { BookingContext } from "@/lib/booking-notification";
 
 /**
  * Polling fallback for Calendly bookings. Calendly only allows webhook
@@ -65,7 +66,49 @@ async function run(req: NextRequest) {
     }
     results.push(r);
   }
-  return NextResponse.json({ ok: true, results });
+
+  // Retry sweep: a notification that failed on first attempt (e.g. a
+  // transient Mailgun error, or the client's only mailbox temporarily
+  // unverified) has no other path back to "sent" — this cron already runs on
+  // a schedule, so it doubles as the retry mechanism. Only the SPECIFIC
+  // notification(s) still marked failed are re-sent; one already "sent" is
+  // never touched, so no duplicate email can result from a retry.
+  let bq = admin
+    .from("bookings")
+    .select(
+      "calendly_event_id, client_id, lead_id, invitee_email, invitee_name, invitee_timezone, meeting_location, cancel_url, reschedule_url, event_name, meeting_topic, scheduled_at, meeting_duration, client_notification_status, customer_notification_status"
+    )
+    .eq("booking_status", "scheduled")
+    .or("client_notification_status.eq.failed,customer_notification_status.eq.failed");
+  if (onlyClient) bq = bq.eq("client_id", onlyClient);
+  const { data: failedBookings } = await bq;
+
+  let retried = 0;
+  for (const row of failedBookings ?? []) {
+    const endTime =
+      row.scheduled_at && row.meeting_duration
+        ? new Date(new Date(row.scheduled_at).getTime() + row.meeting_duration * 60000).toISOString()
+        : undefined;
+    const context: BookingContext = {
+      startTime: row.scheduled_at ?? undefined,
+      endTime,
+      inviteeEmail: row.invitee_email ?? "",
+      inviteeName: row.invitee_name,
+      inviteeTimezone: row.invitee_timezone,
+      meetingLocation: row.meeting_location,
+      cancelUrl: row.cancel_url,
+      rescheduleUrl: row.reschedule_url,
+      eventName: row.event_name,
+      meetingTopic: row.meeting_topic,
+    };
+    await sendBookingNotifications(admin, row.client_id, row.lead_id, row.calendly_event_id, context, {
+      client: row.client_notification_status === "failed",
+      customer: row.customer_notification_status === "failed",
+    });
+    retried++;
+  }
+
+  return NextResponse.json({ ok: true, results, notificationsRetried: retried });
 }
 
 export async function GET(req: NextRequest) {

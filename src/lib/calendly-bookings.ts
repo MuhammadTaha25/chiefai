@@ -1,6 +1,69 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { notifyClientOfBooking, notifyCustomerOfBooking } from "@/lib/booking-notification";
+import { notifyClientOfBooking, notifyCustomerOfBooking, type BookingContext } from "@/lib/booking-notification";
 import { logEvent } from "@/lib/log-event";
+
+/**
+ * Sends whichever of the two booking notifications are asked for and writes
+ * their outcome onto the booking row. Used both right after a booking is
+ * first recorded (both notifications requested) and by the retry sweep in
+ * the Calendly polling cron (only the ones still `failed`/`pending`
+ * requested) — the same function either way, so a retry can never diverge
+ * from the original send logic.
+ *
+ * A notification failing must never un-confirm a real booking: the booking
+ * row itself is never touched by this function beyond the two status
+ * columns, and the status UPDATE's own error is logged (not swallowed) so a
+ * transient DB failure here shows up instead of silently leaving a `sent`
+ * email recorded as "pending" forever.
+ */
+export async function sendBookingNotifications(
+  admin: SupabaseClient,
+  clientId: string,
+  leadId: string,
+  inviteeUri: string,
+  bookingContext: BookingContext,
+  which: { client: boolean; customer: boolean }
+): Promise<{ clientSent: boolean | null; customerSent: boolean | null }> {
+  let clientSent: boolean | null = null;
+  let customerSent: boolean | null = null;
+  const statusUpdate: Record<string, string> = {};
+
+  if (which.client) {
+    const note = await notifyClientOfBooking(admin, clientId, leadId, bookingContext).catch((e) => ({
+      sent: false,
+      reason: (e as Error).message,
+    }));
+    clientSent = note.sent;
+    statusUpdate.client_notification_status = note.sent ? "sent" : "failed";
+    if (!note.sent) {
+      // eslint-disable-next-line no-console
+      console.error(`Client booking notification not sent for client ${clientId}: ${note.reason}`);
+    }
+  }
+
+  if (which.customer) {
+    const note = await notifyCustomerOfBooking(admin, clientId, leadId, bookingContext).catch((e) => ({
+      sent: false,
+      reason: (e as Error).message,
+    }));
+    customerSent = note.sent;
+    statusUpdate.customer_notification_status = note.sent ? "sent" : "failed";
+    if (!note.sent) {
+      // eslint-disable-next-line no-console
+      console.error(`Customer booking confirmation not sent for client ${clientId}: ${note.reason}`);
+    }
+  }
+
+  if (Object.keys(statusUpdate).length > 0) {
+    const { error } = await admin.from("bookings").update(statusUpdate).eq("calendly_event_id", inviteeUri).eq("client_id", clientId);
+    if (error) {
+      // eslint-disable-next-line no-console
+      console.error(`Could not record notification status for booking ${inviteeUri}: ${error.message}`);
+    }
+  }
+
+  return { clientSent, customerSent };
+}
 
 /**
  * The single place a Calendly booking becomes app state — used by BOTH the
@@ -37,12 +100,22 @@ export async function recordInviteeBooking(
   // classified BOOKING — see src/app/api/webhooks/mailgun/route.ts — and
   // carried on the lead row from there, so the booking record inherits
   // exactly what the conversation was actually about, not a re-guess.
+  //
+  // The same email can legitimately exist as more than one lead row for one
+  // client (re-targeted in a later campaign, re-imported, etc. — there is no
+  // unique constraint on leads.email). Picking "most recently CREATED" would
+  // attribute a real booking to whichever row happened to be inserted last,
+  // not the one whose conversation actually produced it. Instead: exclude
+  // leads already marked booked (their story is closed) and pick the one
+  // with the most recent outreach/reply ACTIVITY — the lead this prospect
+  // was actually just talking to.
   const { data: lead } = await admin
     .from("leads")
     .select("id, campaign_id, meeting_topic")
     .eq("client_id", clientId)
     .eq("email", email)
-    .order("created_at", { ascending: false })
+    .eq("booked", false)
+    .order("last_contact_at", { ascending: false, nullsFirst: false })
     .limit(1)
     .maybeSingle<{ id: string; campaign_id: string | null; meeting_topic: string | null }>();
   if (!lead) return { status: "unresolved", reason: "no matching lead" };
@@ -93,7 +166,7 @@ export async function recordInviteeBooking(
   // "deduped" above), so both notifications fire exactly once per booking —
   // true even when the webhook and the polling fallback both see the same
   // event, since only one of them wins the unique-constraint insert.
-  const bookingContext = {
+  const bookingContext: BookingContext = {
     startTime: b.startTime,
     endTime: b.endTime,
     scheduledEventUri: b.scheduledEventUri,
@@ -107,44 +180,18 @@ export async function recordInviteeBooking(
     meetingTopic,
   };
 
-  // A notification failing must never un-confirm a real booking — each
-  // outcome is recorded on the row (and left "pending" is never possible
-  // past this point) so a failed send can be told apart from one that was
-  // never attempted, and safely retried later without re-booking anything.
-  const clientNote = await notifyClientOfBooking(admin, clientId, lead.id, bookingContext).catch((e) => ({
-    sent: false,
-    reason: (e as Error).message,
-  }));
-  if (!clientNote.sent) {
-    // eslint-disable-next-line no-console
-    console.error(`Client booking notification not sent for client ${clientId}: ${clientNote.reason}`);
-  }
-
-  const customerNote = await notifyCustomerOfBooking(admin, clientId, lead.id, bookingContext).catch((e) => ({
-    sent: false,
-    reason: (e as Error).message,
-  }));
-  if (!customerNote.sent) {
-    // eslint-disable-next-line no-console
-    console.error(`Customer booking confirmation not sent for client ${clientId}: ${customerNote.reason}`);
-  }
-
-  await admin
-    .from("bookings")
-    .update({
-      client_notification_status: clientNote.sent ? "sent" : "failed",
-      customer_notification_status: customerNote.sent ? "sent" : "failed",
-    })
-    .eq("calendly_event_id", b.inviteeUri)
-    .eq("client_id", clientId);
+  const { clientSent, customerSent } = await sendBookingNotifications(admin, clientId, lead.id, b.inviteeUri, bookingContext, {
+    client: true,
+    customer: true,
+  });
 
   logEvent("booking.recorded", {
     client_id: clientId,
     lead_id: lead.id,
     campaign_id: lead.campaign_id,
     provider_event_id: b.inviteeUri,
-    client_notified: clientNote.sent,
-    customer_notified: customerNote.sent,
+    client_notified: clientSent,
+    customer_notified: customerSent,
     result: "booked",
   });
   return { status: "booked", leadId: lead.id };
