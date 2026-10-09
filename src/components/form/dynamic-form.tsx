@@ -97,16 +97,23 @@ export function DynamicForm({
   // step-by-step flow; every optional section is grouped behind a single "add more detail?" opt-in after
   // them, so the default path is short and fine-tuning is there for whoever wants it.
   type WizardItem = { kind: "section"; section: SectionConfig } | { kind: "interstitial" };
-  const items = useMemo<WizardItem[]>(() => {
-    const core = visibleSections.filter((s) => !s.optional);
-    const advanced = visibleSections.filter((s) => s.optional);
-    return [
-      ...core.map((section) => ({ kind: "section" as const, section })),
-      ...(advanced.length ? [{ kind: "interstitial" as const }] : []),
-      ...advanced.map((section) => ({ kind: "section" as const, section })),
-    ];
-  }, [visibleSections]);
+  const coreSections = useMemo(() => visibleSections.filter((s) => !s.optional), [visibleSections]);
+  const advancedSections = useMemo(() => visibleSections.filter((s) => s.optional), [visibleSections]);
+  const items = useMemo<WizardItem[]>(
+    () => [
+      ...coreSections.map((section) => ({ kind: "section" as const, section })),
+      ...(advancedSections.length ? [{ kind: "interstitial" as const }] : []),
+      ...advancedSections.map((section) => ({ kind: "section" as const, section })),
+    ],
+    [coreSections, advancedSections]
+  );
   const current = items[step];
+  // The step counter and progress dots only ever count what the client is actually committed to right
+  // now: while in the core flow, "N of coreSections.length" (never the inflated total including optional
+  // sections they may skip entirely) — that total is exactly what made the form look long. Once they've
+  // opted into fine-tuning, the counter switches to its own "optional N of advancedSections.length".
+  const inCoreRange = step < coreSections.length;
+  const advancedIndex = step - coreSections.length - 1; // 0-based position within advancedSections, once past the interstitial
   const section = current?.kind === "section" ? current.section : undefined;
 
   function set(id: string, value: unknown) {
@@ -215,11 +222,8 @@ export function DynamicForm({
     return (
       <div className="mx-auto max-w-xl">
         <div className="mb-6 flex gap-1.5">
-          {items.map((it, i) => (
-            <div
-              key={it.kind === "section" ? it.section.id : "interstitial"}
-              className={`h-1.5 flex-1 rounded-full ${i <= step ? "bg-foreground" : "bg-zinc-200 dark:bg-zinc-800"}`}
-            />
+          {coreSections.map((s) => (
+            <div key={s.id} className="h-1.5 flex-1 rounded-full bg-foreground" />
           ))}
         </div>
 
@@ -265,17 +269,20 @@ export function DynamicForm({
   return (
     <div className="mx-auto max-w-xl">
       <div className="mb-6 flex gap-1.5">
-        {items.map((it, i) => (
+        {(inCoreRange ? coreSections : advancedSections).map((s, i) => (
           <div
-            key={it.kind === "section" ? it.section.id : "interstitial"}
-            className={`h-1.5 flex-1 rounded-full ${i <= step ? "bg-foreground" : "bg-zinc-200 dark:bg-zinc-800"}`}
+            key={s.id}
+            className={`h-1.5 flex-1 rounded-full ${
+              i <= (inCoreRange ? step : advancedIndex) ? "bg-foreground" : "bg-zinc-200 dark:bg-zinc-800"
+            }`}
           />
         ))}
       </div>
 
       <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-        Step {step + 1} of {items.length}
-        {inAdvanced ? " · optional" : ""}
+        {inCoreRange
+          ? `Step ${step + 1} of ${coreSections.length}`
+          : `Optional step ${advancedIndex + 1} of ${advancedSections.length}`}
       </p>
       <h1 className="mt-1 text-2xl font-semibold tracking-tight">{section.title}</h1>
       {section.intro && <p className="mt-1.5 text-sm text-zinc-500">{section.intro}</p>}
