@@ -3,14 +3,12 @@
  * table (service-role only — see supabase/add_signup_email_verification.sql)
  * and the email send.
  *
- * The email itself goes through the SAME n8n webhook already used in
- * production for appointment-notification emails
- * ("Infomist - Appointment Notification Email", active, SMTP-backed, generic
- * {to, subject, text} payload) rather than a freshly created workflow: that
- * endpoint already has a working SMTP credential attached in n8n, so sending
- * through it is real and immediate. A brand-new n8n node would need someone
- * to manually attach an SMTP credential in the n8n UI before it could send
- * anything, which would silently break "send it now."
+ * The email goes through a dedicated n8n webhook ("Infomist - Signup
+ * Verification Email", active, SMTP-backed via n8n's existing SMTP
+ * credential, generic {to, subject, text} payload). It sends FROM
+ * murtazamajid.123@gmail.com specifically — sending from appointment@infomist.com
+ * (infomist.com has no SPF/DKIM authorizing this relay) was accepted by the
+ * SMTP hop but never actually arrived; the Gmail sender fixed delivery.
  */
 import crypto from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -23,7 +21,7 @@ import {
   type VerifyResult,
 } from "@/lib/signup-verification-core";
 
-const N8N_EMAIL_WEBHOOK_PATH = "/webhook/infomist/appointment-notification-email";
+const N8N_EMAIL_WEBHOOK_PATH = "/webhook/infomist/signup-verification-email";
 const TIMEOUT_MS = 15_000;
 
 export function missingSignupVerificationConfig(env: NodeJS.ProcessEnv = process.env): string[] {
