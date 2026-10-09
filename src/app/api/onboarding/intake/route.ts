@@ -18,19 +18,6 @@ export async function POST(req: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  if (!user.email) return NextResponse.json({ error: "Account has no email on file" }, { status: 400 });
-
-  const verifyAdmin = createAdminClient();
-  const { data: verification } = await verifyAdmin
-    .from("signup_email_verifications")
-    .select("status")
-    .eq("email", user.email.trim().toLowerCase())
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<{ status: string }>();
-  if (verification?.status !== "verified") {
-    return NextResponse.json({ error: "Please verify your email first", code: "EMAIL_NOT_VERIFIED" }, { status: 403 });
-  }
 
   let body: Record<string, unknown>;
   try {
@@ -46,7 +33,7 @@ export async function POST(req: NextRequest) {
   const companyName = str(body.companyName, 200);
   if (!companyName) return NextResponse.json({ error: "companyName is required" }, { status: 400 });
 
-  const admin = verifyAdmin;
+  const admin = createAdminClient();
   const { data: existing } = await admin.from("clients").select("id").eq("auth_user_id", user.id).maybeSingle<{ id: string }>();
 
   // Only fields actually present in the request are written, so a partial

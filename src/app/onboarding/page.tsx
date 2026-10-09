@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -22,16 +21,7 @@ export default function OnboardingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ companyName, icpIndustry: industry, icpLocation: location }),
       });
-      if (!res.ok) {
-        const data = await res.json();
-        if (data.code === "EMAIL_NOT_VERIFIED") {
-          const { data: userData } = await createClient().auth.getUser();
-          const email = userData.user?.email ?? "";
-          router.push(`/verify-email?email=${encodeURIComponent(email)}`);
-          return;
-        }
-        throw new Error(data.error || "Failed to save");
-      }
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to save");
       router.push("/dashboard");
       router.refresh();
     } catch (e) {
