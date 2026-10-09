@@ -1,5 +1,6 @@
 import StatCard from "@/components/stat-card";
 import type { OutreachStatus } from "@/lib/outreach-status";
+import { formatClockInTimezone, formatDateInTimezone } from "@/lib/format-time";
 
 const INTENT_COLOR: Record<string, string> = {
   booking: "text-green-600",
@@ -24,14 +25,16 @@ function pipelineStep(leadStatus: string, touchCount: number): string {
   return `Touch ${touchCount} sent`;
 }
 
-export default function OutreachPipeline({ status }: { status: OutreachStatus | null }) {
+// This is a server component, so a bare toLocaleTimeString()/toLocaleDateString() would render in the
+// host clock (UTC on Vercel). Show the owner's timezone instead, defaulting to the app-wide Asia/Karachi.
+export default function OutreachPipeline({ status, timeZone = "Asia/Karachi" }: { status: OutreachStatus | null; timeZone?: string }) {
   return (
     <div>
       <div className="flex items-baseline justify-between">
         <h2 className="text-lg font-semibold">Outreach pipeline</h2>
         {status && (
           <span className="text-xs text-zinc-500">
-            Updated {new Date(status.generated_at).toLocaleTimeString()}
+            Updated {formatClockInTimezone(status.generated_at, timeZone)}
           </span>
         )}
       </div>
@@ -87,7 +90,7 @@ export default function OutreachPipeline({ status }: { status: OutreachStatus | 
                       )}
                     </td>
                     <td className="px-4 py-3 text-zinc-500">
-                      {lead.next_touch_at ? new Date(lead.next_touch_at).toLocaleDateString() : "—"}
+                      {formatDateInTimezone(lead.next_touch_at, timeZone)}
                     </td>
                   </tr>
                 ))}
