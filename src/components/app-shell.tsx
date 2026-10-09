@@ -79,11 +79,18 @@ export default function AppShell({ children, companyName }: { children: ReactNod
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [dark, setDark] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
 
   useEffect(() => {
     const stored = localStorage.getItem("infomist-theme");
     // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate persisted theme after mount (avoids SSR mismatch)
     setDark(stored === "dark");
+  }, []);
+
+  useEffect(() => {
+    createClient()
+      .auth.getUser()
+      .then(({ data }) => setUserEmail(data.user?.email ?? null));
   }, []);
 
   useEffect(() => {
@@ -106,6 +113,7 @@ export default function AppShell({ children, companyName }: { children: ReactNod
     .slice(0, 2)
     .join("")
     .toUpperCase();
+  const userInitials = userEmail ? userEmail.slice(0, 2).toUpperCase() : "";
 
   return (
     <div className="flex min-h-screen bg-canvas">
@@ -118,7 +126,7 @@ export default function AppShell({ children, companyName }: { children: ReactNod
           <div className="grid size-6 shrink-0 place-items-center rounded-full bg-[#7357FF] text-white">
             <Compass className="size-3.5" />
           </div>
-          {!collapsed && <span className="type-subhead truncate text-ink">Northstar</span>}
+          {!collapsed && <span className="type-subhead truncate text-ink">ChiefAI</span>}
         </div>
 
         {!collapsed && (
@@ -187,14 +195,13 @@ export default function AppShell({ children, companyName }: { children: ReactNod
         </nav>
 
         <div className="border-t border-hairline p-2">
-          {!collapsed && (
+          {!collapsed && userEmail && (
             <div className="flex items-center gap-2 px-2 py-2">
               <span className="grid size-7 shrink-0 place-items-center rounded-full bg-[#101828] text-[11px] font-semibold text-white">
-                AH
+                {userInitials}
               </span>
               <span className="min-w-0">
-                <span className="block truncate text-[0.8125rem] font-medium text-ink">Alex Hart</span>
-                <span className="block text-[0.6875rem] text-ink-tertiary">CEO</span>
+                <span className="block truncate text-[0.8125rem] font-medium text-ink">{userEmail}</span>
               </span>
             </div>
           )}

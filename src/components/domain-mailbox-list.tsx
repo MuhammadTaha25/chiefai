@@ -29,7 +29,7 @@ export default function DomainMailboxList({ mailboxes }: { mailboxes: MailboxRow
   if (mailboxes.length === 0) return null;
 
   async function handleDelete(id: string, address: string) {
-    if (!confirm(`Delete ${address}? This only removes it from Northstar — any Mailgun route stays.`)) return;
+    if (!confirm(`Delete ${address}? This only removes it from ChiefAI — any Mailgun route stays.`)) return;
 
     setDeletingId(id);
     setError(null);

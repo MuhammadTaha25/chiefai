@@ -182,5 +182,5 @@ export async function POST(req: NextRequest) {
 
 /** Twilio may probe with GET; answer politely rather than 405. */
 export async function GET() {
-  return twiml(`<Say voice="Polly.Joanna">This number is answered by your Northstar assistant. Please call back.</Say><Hangup/>`);
+  return twiml(`<Say voice="Polly.Joanna">This number is answered by your ChiefAI assistant. Please call back.</Say><Hangup/>`);
 }
