@@ -12,6 +12,7 @@ import DomainLiveStatus from "@/components/domain-live-status";
 import DomainMailboxList from "@/components/domain-mailbox-list";
 import DomainMailboxAdd from "@/components/domain-mailbox-add";
 import DomainExternalSetup from "@/components/domain-external-setup";
+import DomainChoice from "@/components/domain-choice";
 import { getMailboxReadiness } from "@/lib/mailgun";
 
 interface DomainPurchaseRow {
@@ -148,13 +149,11 @@ export default async function DomainsPage(props: {
         payment goes through, and DNS/mailbox setup happens right after.
       </p>
 
-      <DomainPurchasePanel />
+      <DomainChoice buyPanel={<DomainPurchasePanel />} existingPanel={<DomainExternalSetup />} />
 
       <DomainLiveStatus />
 
       <DomainPurchaseHistory purchases={purchases ?? []} />
-
-      <DomainExternalSetup />
 
       <DomainMailboxAdd domains={(ownedDomains ?? []).map((d) => d.domain)} />
 

@@ -4,6 +4,7 @@ import { getCurrentClient } from "@/lib/get-current-client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendMail, mailgunDomainForAddress } from "@/lib/mailgun";
 import { withUnsubscribeFooter, unsubscribeHeaders } from "@/lib/compliance";
+import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
 
 const FOLLOW_UP_INTERVAL_DAYS = 3;
 
@@ -78,6 +79,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     );
   }
   const mailbox = reservation.mailbox;
+
+  // REGRESSION FIX (Final Regression Audit, 2026-10-09): this manual
+  // per-lead send path was missed by the original P0 fix's "every sending
+  // path" sweep — it reserved a mailbox slot but never re-checked domain
+  // ownership/disconnected state before sending.
+  const mailboxDomain = mailgunDomainForAddress(mailbox.address);
+  const externalDomains = await getExternalDomainsForClient(admin, client.id);
+  const usable = await assertDomainUsableByClient(admin, client.id, mailboxDomain, { requireExplicitOwnership: externalDomains.has(mailboxDomain) });
+  if (!usable.usable || (await isDomainDisconnected(admin, client.id, mailboxDomain))) {
+    await releaseReservation(admin, reservation.reservationId);
+    return NextResponse.json({ error: `Domain ${mailboxDomain} is not usable (ownership unverified or disconnected)` }, { status: 403 });
+  }
 
   let sentMsgId: string | undefined;
   try {

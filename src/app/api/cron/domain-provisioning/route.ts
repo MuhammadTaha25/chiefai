@@ -191,20 +191,34 @@ async function runDomainProvisioning(req: NextRequest) {
   //     This used to be retried by nobody, so a single transient failure left the domain broken forever.
   //   - dns_status "active" but Mailgun has no such domain: stored state drifted from the provider -> rebuild it.
   // Only domains Hostinger has confirmed as registered are touched: DNS is never written for an unregistered domain.
-  let domainsQuery = admin.from("domains").select("id, client_id, domain, dns_status");
+  let domainsQuery = admin.from("domains").select("id, client_id, domain, dns_status, dns_managed_externally");
   if (clientIdFilter) domainsQuery = domainsQuery.eq("client_id", clientIdFilter);
   const { data: allDomains } = await domainsQuery;
 
   for (const d of allDomains ?? []) {
-    const { data: purchase } = await admin
-      .from("domain_purchases")
-      .select("status")
-      .eq("client_id", d.client_id)
-      .eq("domain", d.domain)
-      .eq("status", "registered")
-      .limit(1)
-      .maybeSingle();
-    if (!purchase) continue;
+    if (d.dns_managed_externally) {
+      // P1 FIX (Existing-Domain Feature Audit, 2026-10-09): this loop used to
+      // gate every domain on having a `domain_purchases` row with status
+      // "registered" — an externally-managed domain never has one (it was
+      // never bought), so the automatic repair/retry cron silently never
+      // touched Path B domains at all. Gate those on domain_ownership
+      // instead: only retry a domain whose ownership challenge has actually
+      // been completed by THIS client (ensureDomainProvisioned enforces the
+      // same rule internally, but skipping here avoids a pointless Mailgun
+      // call for a domain that has no chance of succeeding yet).
+      const { data: owned } = await admin.from("domain_ownership").select("client_id").eq("domain", d.domain).maybeSingle<{ client_id: string }>();
+      if (!owned || owned.client_id !== d.client_id) continue;
+    } else {
+      const { data: purchase } = await admin
+        .from("domain_purchases")
+        .select("status")
+        .eq("client_id", d.client_id)
+        .eq("domain", d.domain)
+        .eq("status", "registered")
+        .limit(1)
+        .maybeSingle();
+      if (!purchase) continue;
+    }
 
     const needsWork =
       d.dns_status === "pending" ||

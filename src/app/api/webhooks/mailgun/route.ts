@@ -8,6 +8,8 @@ import { insertOutreachLog, REPLY_TOUCH_NUMBER } from "@/lib/outreach-log";
 import { logEvent } from "@/lib/log-event";
 import { verifyMailgunSignature } from "@/lib/webhook-security";
 import { buildEmailHistory } from "@/lib/email-history";
+import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
+import { classifyMailboxMatch } from "@/lib/mailbox-match";
 
 /**
  * Classifies an inbound reply with Gemini (real AI, 4-way: BOOKING / HAPPY /
@@ -153,17 +155,44 @@ export async function POST(req: NextRequest) {
     // a lead lookup scoped only by email could match a different client's
     // lead if two clients' Vibe Prospecting results ever overlap on the same
     // contact address.
-    const { data: receivingMailbox } = await admin
+    // P0 SECURITY FIX (Existing-Domain Feature Audit, 2026-10-09): `mailboxes`
+    // is only unique per (client_id, address), not per address alone, so two
+    // different clients could have a row for the identical address (e.g. a
+    // cross-tenant domain-ownership collision pre-dating the ownership
+    // gate). .maybeSingle() on a query that matches 2+ rows returns an error
+    // the old code never checked, meaning an ambiguous match silently fell
+    // through as "not found" — risking a reply landing on the wrong tenant
+    // (or neither) with no record of why. Fetch up to 2 explicitly instead,
+    // so "ambiguous" is its own loud, logged case, never conflated with
+    // "no mailbox matched" or silently treated as handled.
+    const { data: matchingMailboxes } = await admin
       .from("mailboxes")
       .select("id, client_id, address")
       .ilike("address", mailboxAddressForRecipient(recipient))
-      .maybeSingle<{ id: string; client_id: string; address: string }>();
+      .limit(2)
+      .returns<{ id: string; client_id: string; address: string }[]>();
 
-    if (!receivingMailbox) {
+    const match = classifyMailboxMatch(matchingMailboxes ?? []);
+    if (match.kind === "none") {
       // eslint-disable-next-line no-console
       console.error(`Mailgun inbound webhook: no mailbox row matches recipient ${recipient}`);
       return NextResponse.json({ ok: true, matched_mailbox: false });
     }
+    if (match.kind === "ambiguous") {
+      // Never guess which tenant should receive an ambiguous reply, and
+      // never report success for it — this must be visible for manual
+      // review (it indicates a cross-tenant mailbox-address collision that
+      // the ownership gate should now prevent going forward, but may still
+      // exist from before it shipped).
+      logEvent("mailgun.inbound_ambiguous_mailbox", {
+        recipient,
+        client_ids: match.rows.map((m) => m.client_id).join(","),
+      });
+      // eslint-disable-next-line no-console
+      console.error(`Mailgun inbound webhook: AMBIGUOUS mailbox match for recipient ${recipient} — clients ${match.rows.map((m) => m.client_id).join(", ")}`);
+      return NextResponse.json({ ok: true, matched_mailbox: false, ambiguous: true });
+    }
+    const receivingMailbox = match.row;
 
     // Same prospect can exist as several lead rows (different campaigns/months).
     // "Latest lead with this email" alone can pick the wrong campaign, so
@@ -269,6 +298,18 @@ export async function POST(req: NextRequest) {
     // auto-reply send could fail for a reason unrelated to this thread.
     const mailbox = receivingMailbox;
 
+    // REGRESSION FIX (Final Regression Audit, 2026-10-09): this webhook's two
+    // outbound sends (unsubscribe confirmation, AI auto-reply) were missed by
+    // the original P0 fix's sweep. Computed once, used to gate both below —
+    // inbound processing (lead state, dedup, logging) still happens either
+    // way; only the OUTBOUND send is blocked, so a disconnected/unverified
+    // domain never stops us from correctly recording that a reply arrived.
+    const mailboxDomain = mailgunDomainForAddress(mailbox.address);
+    const externalDomainsForReply = await getExternalDomainsForClient(admin, mailbox.client_id);
+    const domainUsableForSending =
+      (await assertDomainUsableByClient(admin, mailbox.client_id, mailboxDomain, { requireExplicitOwnership: externalDomainsForReply.has(mailboxDomain) })).usable &&
+      !(await isDomainDisconnected(admin, mailbox.client_id, mailboxDomain));
+
     // Classify first, always — a stop/unsubscribe request used to short-circuit
     // before this and leave reply_classification NULL. The deterministic
     // unsubscribe check below still decides the stop action; the model only
@@ -294,7 +335,7 @@ export async function POST(req: NextRequest) {
 
       await incrementCampaignReplyCount(admin, lead.campaign_id);
 
-      if (mailbox && client) {
+      if (mailbox && client && domainUsableForSending) {
         const confirmation = unsubscribeConfirmation(client.company_name ?? "us");
         try {
           const sentMsg = await sendMail({
@@ -387,7 +428,10 @@ export async function POST(req: NextRequest) {
       logEvent("inbound.auto_reply_cap", { client_id: lead.client_id, lead_id: lead.id, result: "human_takeover", cap: MAX_AUTO_REPLIES_PER_LEAD });
     }
 
-    if (mailbox && client && (await getMailboxReadiness(mailbox.address)) !== "ready") {
+    if (mailbox && client && !domainUsableForSending) {
+      // eslint-disable-next-line no-console
+      console.error(`Reply not sent: mailbox ${mailbox.address}'s domain ownership is unverified or disconnected`);
+    } else if (mailbox && client && (await getMailboxReadiness(mailbox.address)) !== "ready") {
       // eslint-disable-next-line no-console
       console.error(`Reply not sent: mailbox ${mailbox.address} has no verified Mailgun domain`);
     } else if (mailbox && client && classification === "ANGRY" && (lead.tone_recovery_attempts ?? 0) > 0) {

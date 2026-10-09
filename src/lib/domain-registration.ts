@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { purchaseDomain, completeDomainSetup, getPortfolioStatus, getPortfolioEntry } from "@/lib/hostinger";
 import { ensureDomainProvisioned } from "@/lib/domain-provisioning";
+import { claimPurchasedDomainOwnership } from "@/lib/domain-ownership";
 
 /**
  * The actual Hostinger-registration + domains-mirror + mailbox/DNS
@@ -178,6 +179,15 @@ export async function registerDomainAndProvision(params: {
     // while silently never writing the DNS records at all, so it runs in-process now and every step's ACTUAL
     // result (records read back from the zone, Mailgun's own verified state) gates the next one and the stored
     // dns_status. The same idempotent routine is what the provisioning cron uses to repair a domain.
+    // Real proof of control — Hostinger just confirmed we registered (paid
+    // for) this exact domain — so this claims global ownership for the
+    // purchasing client, closing the gap where another client could later
+    // "Use an Existing Domain" with this same string and, pre-fix, have
+    // ridden on Mailgun's shared "active" state. Best-effort: never blocks
+    // a paid, already-registered domain over a DB race, and never
+    // overwrites an existing conflicting row (see claimPurchasedDomainOwnership).
+    await claimPurchasedDomainOwnership(admin, clientId, domain);
+
     const mailboxAddress = `sales@${domain}`;
     // Atomic upsert (unique (client_id, address)): a redelivered webhook racing a manual retry cannot create a
     // second row. A mailbox row never means "can send" - readiness is gated on Mailgun's verified domain state.

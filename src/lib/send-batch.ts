@@ -8,6 +8,7 @@ import { cleanOutreachEmail, lintOutreachEmail } from "@/lib/email-quality";
 import { sendMail, mailgunDomainForAddress, getMailboxReadiness } from "@/lib/mailgun";
 import { withUnsubscribeFooter, unsubscribeHeaders } from "@/lib/compliance";
 import { resolveFirstFollowUpDelayMs } from "@/lib/follow-up-config";
+import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
 
 const DAILY_INITIAL_SEND_LIMIT = 4;
 // The delay before the first follow-up check comes from follow-up-config.ts
@@ -160,6 +161,12 @@ export async function sendBatchForClient(clientId: string) {
   const industry = targetIndustries.length === 1 ? String(targetIndustries[0]) : null;
   const rotatedMailboxes = shuffle(mailboxes);
   const sent: { leadId: string; mailbox: string; result: "sent" | "failed"; error?: string }[] = [];
+  // P0 defensive re-check: fetched once per batch, not per lead. Normal
+  // operation never hits this (mailbox creation already gates on
+  // ownership), but sending is itself a "relevant ... path" per the fix
+  // requirements, so it is re-verified here independently rather than
+  // trusting that every upstream gate was correctly applied.
+  const externalDomains = await getExternalDomainsForClient(admin, clientId);
 
   for (let i = 0; i < eligibleLeads.length; i++) {
     const lead = eligibleLeads[i];
@@ -171,6 +178,14 @@ export async function sendBatchForClient(clientId: string) {
       break;
     }
     const mailbox = reservation.mailbox;
+
+    const mailboxDomain = mailgunDomainForAddress(mailbox.address);
+    const usable = await assertDomainUsableByClient(admin, clientId, mailboxDomain, { requireExplicitOwnership: externalDomains.has(mailboxDomain) });
+    if (!usable.usable || (await isDomainDisconnected(admin, clientId, mailboxDomain))) {
+      await releaseReservation(admin, reservation.reservationId);
+      sent.push({ leadId: lead.id, mailbox: mailbox.address, result: "failed", error: `Domain ${mailboxDomain} is not usable (ownership unverified or disconnected) — send blocked` });
+      continue;
+    }
 
     // At-most-once per lead: two overlapping runs (cron + manual, or a restarted worker) can both have read
     // this lead as "new". Whoever flips last_contact_at from NULL wins; the other releases its slot and skips.

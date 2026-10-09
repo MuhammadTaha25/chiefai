@@ -2,7 +2,8 @@
 
 import { useRef, useState } from "react";
 import { X, Sparkles, Send } from "lucide-react";
-import { BRIEFING_ITEMS, PROMPT_CHIPS, assistantReplyFor } from "@/lib/workspace-demo-data";
+
+const PROMPT_CHIPS = ["Best leads today", "What is at risk?", "Summarize finances"];
 
 interface Message {
   id: string;
@@ -16,7 +17,7 @@ export function AssistantPanel({ open, onClose }: { open: boolean; onClose: () =
   const [loading, setLoading] = useState(false);
   const nextId = useRef(0);
 
-  function submit(text: string) {
+  async function submit(text: string) {
     const value = text.trim();
     if (!value) return;
     nextId.current += 1;
@@ -24,12 +25,25 @@ export function AssistantPanel({ open, onClose }: { open: boolean; onClose: () =
     setMessages((m) => [...m, userMsg]);
     setInput("");
     setLoading(true);
-    window.setTimeout(() => {
+    try {
+      // Same real, session-scoped Q&A the Dashboard's "Ask your company" uses
+      // (src/app/api/company/ask/route.ts) — answers are grounded in this
+      // client's own aggregate facts, never a canned/fabricated reply.
+      const res = await fetch("/api/company/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: value }),
+      });
+      const data = await res.json();
       nextId.current += 1;
-      const reply: Message = { id: `a-${nextId.current}`, role: "assistant", text: assistantReplyFor(value) };
-      setMessages((m) => [...m, reply]);
+      const text = res.ok ? data.answer : data.error || "Could not answer right now. Please try again.";
+      setMessages((m) => [...m, { id: `a-${nextId.current}`, role: "assistant", text }]);
+    } catch {
+      nextId.current += 1;
+      setMessages((m) => [...m, { id: `a-${nextId.current}`, role: "assistant", text: "Could not reach the server. Please try again." }]);
+    } finally {
       setLoading(false);
-    }, 650);
+    }
   }
 
   if (!open) return null;
@@ -68,21 +82,11 @@ export function AssistantPanel({ open, onClose }: { open: boolean; onClose: () =
 
         <div className="ns-scrollbar flex-1 overflow-y-auto p-5">
           {messages.length === 0 && (
-            <div className="space-y-4">
-              <div className="ns-card p-4" style={{ background: "var(--ns-midnight)", borderColor: "var(--ns-midnight)" }}>
-                <p className="text-[13px] font-semibold text-white">Good morning, Alex.</p>
-                <p className="mt-1 text-[12px] text-white/70">
-                  Here are the three things that will make the biggest difference today.
-                </p>
-              </div>
-              <ul className="space-y-2">
-                {BRIEFING_ITEMS.map((item) => (
-                  <li key={item.id} className="ns-card p-3">
-                    <p className="text-[13px] font-semibold" style={{ color: "#101828" }}>{item.title}</p>
-                    <p className="ns-body text-[12px]">{item.meta}</p>
-                  </li>
-                ))}
-              </ul>
+            <div className="ns-card p-4" style={{ background: "var(--ns-midnight)", borderColor: "var(--ns-midnight)" }}>
+              <p className="text-[13px] font-semibold text-white">Ask anything about your business.</p>
+              <p className="mt-1 text-[12px] text-white/70">
+                Leads, revenue, projects, bookings — answered from your own data.
+              </p>
             </div>
           )}
 

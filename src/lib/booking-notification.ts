@@ -1,6 +1,19 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendMail, mailgunDomainForAddress } from "@/lib/mailgun";
 import { pickReadyMailbox } from "@/lib/mailbox-readiness";
+import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
+
+/**
+ * REGRESSION FIX (Final Regression Audit, 2026-10-09): both booking-notification
+ * sends were missed by the original P0 fix's sweep. Shared here since both
+ * functions below need the identical check.
+ */
+async function assertMailboxDomainUsable(admin: SupabaseClient, clientId: string, mailboxAddress: string): Promise<boolean> {
+  const domain = mailgunDomainForAddress(mailboxAddress);
+  const externalDomains = await getExternalDomainsForClient(admin, clientId);
+  const usable = await assertDomainUsableByClient(admin, clientId, domain, { requireExplicitOwnership: externalDomains.has(domain) });
+  return usable.usable && !(await isDomainDisconnected(admin, clientId, domain));
+}
 
 export interface BookingContext {
   startTime?: string;
@@ -65,6 +78,9 @@ export async function notifyClientOfBooking(
 
   const mailbox = await pickReadyMailbox(admin, clientId);
   if (!mailbox) return { sent: false, reason: "no verified mailbox to send from" };
+  if (!(await assertMailboxDomainUsable(admin, clientId, mailbox.address))) {
+    return { sent: false, reason: "domain ownership unverified or disconnected" };
+  }
 
   const { data: lead } = await admin
     .from("leads")
@@ -132,6 +148,9 @@ export async function notifyCustomerOfBooking(
 
   const mailbox = await pickReadyMailbox(admin, clientId);
   if (!mailbox) return { sent: false, reason: "no verified mailbox to send from" };
+  if (!(await assertMailboxDomainUsable(admin, clientId, mailbox.address))) {
+    return { sent: false, reason: "domain ownership unverified or disconnected" };
+  }
 
   const { data: lead } = await admin
     .from("leads")

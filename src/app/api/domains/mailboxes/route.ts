@@ -4,6 +4,7 @@ import { getCurrentClient } from "@/lib/get-current-client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getMailboxReadiness } from "@/lib/mailgun";
 import { ensureDomainProvisioned } from "@/lib/domain-provisioning";
+import { assertDomainUsableByClient } from "@/lib/domain-ownership";
 
 const LOCAL_PART_RE = /^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$/i;
 
@@ -58,6 +59,29 @@ export async function POST(req: NextRequest) {
       { error: "Still finishing registration — wait a few seconds and try again" },
       { status: 404 }
     );
+  }
+
+  // P0 SECURITY GATE: mailbox creation is the step that actually makes a
+  // domain usable for outreach, so it is re-checked here independently of
+  // ensureDomainProvisioned's own internal gate — never create a mailbox
+  // row for a domain this client doesn't (or can't yet prove they) own.
+  const { data: domainManagement } = await supabase
+    .from("domains")
+    .select("dns_managed_externally")
+    .eq("client_id", client.id)
+    .eq("domain", domain)
+    .maybeSingle<{ dns_managed_externally: boolean | null }>();
+  const usable = await assertDomainUsableByClient(createAdminClient(), client.id, domain, {
+    requireExplicitOwnership: domainManagement?.dns_managed_externally === true,
+  });
+  if (!usable.usable) {
+    const message =
+      usable.reason === "owned_by_other"
+        ? "This domain is connected to a different account."
+        : usable.reason === "ownership_not_verified"
+          ? "Verify ownership of this domain before creating mailboxes on it."
+          : "Invalid domain.";
+    return NextResponse.json({ error: message }, { status: 403 });
   }
 
   const cleanLocals = locals.map((l) => String(l).trim().toLowerCase()).filter(Boolean);

@@ -7,6 +7,7 @@ import { draftFollowUpEmail } from "@/lib/gemini";
 import { cleanOutreachEmail } from "@/lib/email-quality";
 import { FORM_LEAD_SOURCE, autoSendSince } from "@/lib/campaign";
 import { resolveFollowUpIntervalMs } from "@/lib/follow-up-config";
+import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
 
 // Cadence between stages comes from follow-up-config.ts (client-configurable
 // via criteria.follow_up_delay_days, default 3 days) — shared with
@@ -88,6 +89,16 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
   // Soft time budget so one run stays inside a short serverless limit; anything
   // not reached keeps its next_follow_up_at and is picked up by the next run.
   const runStartedAt = Date.now();
+  // P0 defensive re-check (see send-batch.ts): cached per client_id since one
+  // batch spans every client's due leads, not just one.
+  const externalDomainsByClient = new Map<string, Set<string>>();
+  async function externalDomainsFor(clientId: string): Promise<Set<string>> {
+    const cached = externalDomainsByClient.get(clientId);
+    if (cached) return cached;
+    const fresh = await getExternalDomainsForClient(admin, clientId);
+    externalDomainsByClient.set(clientId, fresh);
+    return fresh;
+  }
   for (const lead of dueLeads ?? []) {
     if (Date.now() - runStartedAt > 45_000) break;
     try {
@@ -155,6 +166,16 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
         continue;
       }
       const mailbox = reservation.mailbox;
+
+      const mailboxDomain = mailgunDomainForAddress(mailbox.address);
+      const externalDomains = await externalDomainsFor(lead.client_id);
+      const usable = await assertDomainUsableByClient(admin, lead.client_id, mailboxDomain, { requireExplicitOwnership: externalDomains.has(mailboxDomain) });
+      if (!usable.usable || (await isDomainDisconnected(admin, lead.client_id, mailboxDomain))) {
+        await releaseReservation(admin, reservation.reservationId);
+        await admin.from("leads").update({ next_follow_up_at: lead.next_follow_up_at }).eq("id", lead.id).is("next_follow_up_at", null);
+        results.push({ leadId: lead.id, result: "error", detail: `Domain ${mailboxDomain} is not usable (ownership unverified or disconnected) — follow-up blocked` });
+        continue;
+      }
 
       try {
       const businessContext = formatBusinessContext(await getClientBusinessContext(admin, lead.client_id));

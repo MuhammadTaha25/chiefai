@@ -8,6 +8,8 @@ import {
 } from "@/lib/mailgun";
 import { provisionMailgunDnsRecords, ensureDmarcRecord } from "@/lib/hostinger";
 import { provisionDomain, dnsStatusFor, type ProvisionResult } from "@/lib/provision-core";
+import { assertDomainUsableByClient } from "@/lib/domain-ownership";
+import { decideProvisioningGate } from "@/lib/domain-provisioning-core";
 
 /**
  * The one place that turns a REGISTERED domain into a send-and-receive-ready Mailgun domain, and records the
@@ -26,11 +28,26 @@ export async function ensureDomainProvisioned(
   // were never actually added.
   const { data: domainRow } = await admin
     .from("domains")
-    .select("dns_managed_externally")
+    .select("dns_managed_externally, dns_status")
     .eq("client_id", params.clientId)
     .eq("domain", params.domain)
-    .maybeSingle<{ dns_managed_externally: boolean | null }>();
+    .maybeSingle<{ dns_managed_externally: boolean | null; dns_status: string | null }>();
   const external = domainRow?.dns_managed_externally === true;
+
+  // P0 SECURITY GATE (Existing-Domain Feature Audit, 2026-10-09) + REGRESSION
+  // FIX (Final Regression Audit, 2026-10-09): never let Mailgun's own
+  // "active" state stand in for ownership proof, and never let any caller
+  // other than the dedicated reconnect flow silently re-enable a disconnected
+  // domain. The decision itself lives in domain-provisioning-core.ts
+  // (pure, unit-tested); this just gathers its inputs and acts on the result.
+  const usable = await assertDomainUsableByClient(admin, params.clientId, params.domain, { requireExplicitOwnership: external });
+  const gate = decideProvisioningGate({ dnsStatus: domainRow?.dns_status, usable });
+  if (!gate.proceed) {
+    if (domainRow?.dns_status !== "disconnected") {
+      await admin.from("domains").update({ dns_status: "provisioning_failed" }).eq("client_id", params.clientId).eq("domain", params.domain);
+    }
+    return { state: "error", notes: gate.notes };
+  }
 
   const result = await provisionDomain(
     {

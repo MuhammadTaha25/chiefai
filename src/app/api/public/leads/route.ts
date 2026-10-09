@@ -6,6 +6,7 @@ import { draftAidaEmail } from "@/lib/gemini";
 import { sendMail, mailgunDomainForAddress } from "@/lib/mailgun";
 import { withUnsubscribeFooter, unsubscribeHeaders } from "@/lib/compliance";
 import { logEvent } from "@/lib/log-event";
+import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
 
 const FOLLOW_UP_INTERVAL_DAYS = 3;
 
@@ -144,6 +145,18 @@ export async function POST(req: NextRequest) {
     const reservation = sellingDescription ? await reserveMailboxSlot(admin, client.id, lead.id, { touch_number: 1 }) : null;
     if (reservation?.ok && sellingDescription) {
       const mailbox = reservation.mailbox;
+      // REGRESSION FIX (Final Regression Audit, 2026-10-09): this public,
+      // unauthenticated landing-page auto-send path was missed by the
+      // original P0 fix's sweep. Best-effort send, so a blocked domain
+      // silently skips the email rather than failing lead capture.
+      const mailboxDomain = mailgunDomainForAddress(mailbox.address);
+      const externalDomains = await getExternalDomainsForClient(admin, client.id);
+      const usable = await assertDomainUsableByClient(admin, client.id, mailboxDomain, { requireExplicitOwnership: externalDomains.has(mailboxDomain) });
+      if (!usable.usable || (await isDomainDisconnected(admin, client.id, mailboxDomain))) {
+        await releaseReservation(admin, reservation.reservationId);
+        logEvent("lead.captured", { client_id: client.id, lead_id: lead.id, source: "landing_page", result: "stored_send_blocked_domain_not_usable" });
+        return NextResponse.json({ ok: true });
+      }
       try {
       const draft = await draftAidaEmail({
         businessContext: formatBusinessContext(await getClientBusinessContext(admin, client.id)),

@@ -1,19 +1,14 @@
 "use client";
 
 import { X, Mail } from "lucide-react";
-import type { Lead } from "@/lib/workspace-demo-data";
+import type { WorkspaceLead } from "@/lib/workspace-data";
+import { STAGE_LABEL, avatarColorFor, relativeTime } from "@/lib/workspace-data";
 import { Avatar } from "./LeadCard";
 import { StatusBadge } from "./StatusBadge";
 
-const STAGE_TONE = { New: "blue", Contacted: "gray", Qualified: "violet", Proposal: "green" } as const;
+const STAGE_TONE = { sent: "blue", negotiation: "violet", won: "green", lost: "gray" } as const;
 
-const TIMELINE = [
-  { id: "t1", label: "Email opened", when: "2 hours ago" },
-  { id: "t2", label: "Visited pricing page", when: "1 day ago" },
-  { id: "t3", label: "Added to pipeline", when: "6 days ago" },
-];
-
-export function LeadDrawer({ lead, onClose }: { lead: Lead | null; onClose: () => void }) {
+export function LeadDrawer({ lead, onClose }: { lead: WorkspaceLead | null; onClose: () => void }) {
   if (!lead) return null;
 
   return (
@@ -42,21 +37,21 @@ export function LeadDrawer({ lead, onClose }: { lead: Lead | null; onClose: () =
 
         <div className="ns-scrollbar flex-1 overflow-y-auto p-5">
           <div className="flex items-center gap-3">
-            <Avatar name={lead.name} color={lead.avatarColor} size={48} />
+            <Avatar name={lead.name} color={avatarColorFor(lead.name)} size={48} />
             <div>
               <p className="text-[16px] font-semibold" style={{ color: "#101828" }}>{lead.name}</p>
-              <p className="ns-body">{lead.role} · {lead.company}</p>
+              <p className="ns-body">{lead.role || "—"} · {lead.company}</p>
             </div>
           </div>
 
           <dl className="mt-5 grid grid-cols-2 gap-3 text-[12px]">
             <div className="ns-card p-3">
-              <dt className="ns-label mb-1">Match score</dt>
-              <dd className="font-semibold" style={{ color: "#16A36B" }}>{lead.match}%</dd>
+              <dt className="ns-label mb-1">Deal value</dt>
+              <dd className="font-semibold" style={{ color: "#101828" }}>{lead.amount != null ? `$${lead.amount.toLocaleString()}` : "—"}</dd>
             </div>
             <div className="ns-card p-3">
               <dt className="ns-label mb-1">Stage</dt>
-              <dd><StatusBadge label={lead.stage} tone={STAGE_TONE[lead.stage]} /></dd>
+              <dd><StatusBadge label={STAGE_LABEL[lead.stage]} tone={STAGE_TONE[lead.stage]} /></dd>
             </div>
             <div className="ns-card p-3">
               <dt className="ns-label mb-1">Source</dt>
@@ -64,37 +59,21 @@ export function LeadDrawer({ lead, onClose }: { lead: Lead | null; onClose: () =
             </div>
             <div className="ns-card p-3">
               <dt className="ns-label mb-1">Last touch</dt>
-              <dd className="font-medium" style={{ color: "#101828" }}>{lead.lastTouch}</dd>
+              <dd className="font-medium" style={{ color: "#101828" }}>{relativeTime(lead.lastTouchISO)}</dd>
             </div>
           </dl>
 
-          <button className="ns-focus mt-4 flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-[13px] font-semibold text-white" style={{ background: "#7357FF" }}>
-            <Mail className="size-4" aria-hidden /> Email lead
-          </button>
-
           <div className="mt-5 rounded-xl p-4" style={{ background: "#F1F3F7" }}>
-            <p className="text-[12px] font-semibold" style={{ color: "#101828" }}>Send a personal follow-up</p>
-            <p className="mt-1 text-[12px]" style={{ color: "#667085" }}>
-              Reference their recent product launch and offer a 20-minute strategy review.
-            </p>
+            <p className="text-[12px] font-semibold" style={{ color: "#101828" }}>{lead.stageDetail}</p>
           </div>
 
-          <div className="mt-6">
-            <p className="ns-label mb-3">Activity timeline</p>
-            <ul className="space-y-3 border-l pl-4" style={{ borderColor: "var(--ns-border)" }}>
-              {TIMELINE.map((t) => (
-                <li key={t.id} className="relative text-[12px]">
-                  <span
-                    className="absolute -left-[21px] top-1 size-2 rounded-full"
-                    style={{ background: "#7357FF" }}
-                    aria-hidden
-                  />
-                  <p className="font-medium" style={{ color: "#101828" }}>{t.label}</p>
-                  <p style={{ color: "#98A2B3" }}>{t.when}</p>
-                </li>
-              ))}
-            </ul>
-          </div>
+          <a
+            href="/leads"
+            className="ns-focus mt-4 flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-[13px] font-semibold text-white"
+            style={{ background: "#7357FF" }}
+          >
+            <Mail className="size-4" aria-hidden /> Open in Leads
+          </a>
         </div>
       </aside>
     </>
