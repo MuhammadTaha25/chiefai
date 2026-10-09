@@ -188,15 +188,9 @@ export async function registerDomainAndProvision(params: {
     // overwrites an existing conflicting row (see claimPurchasedDomainOwnership).
     await claimPurchasedDomainOwnership(admin, clientId, domain);
 
-    const mailboxAddress = `sales@${domain}`;
-    // Atomic upsert (unique (client_id, address)): a redelivered webhook racing a manual retry cannot create a
-    // second row. A mailbox row never means "can send" - readiness is gated on Mailgun's verified domain state.
-    await admin
-      .from("mailboxes")
-      .upsert(
-        { client_id: clientId, address: mailboxAddress, warmup_day: 1, daily_send_limit: 3 },
-        { onConflict: "client_id,address", ignoreDuplicates: true }
-      );
+    // No mailbox is auto-created on registration — the client picks their own mailbox name(s) on the
+    // Domains page ("Add a mailbox"). DNS/Mailgun provisioning for the domain itself still runs
+    // immediately so it's ready the moment the client adds their first mailbox.
     await ensureDomainProvisioned(admin, { clientId, domain, publicOrigin });
 
     return { ok: true as const };
