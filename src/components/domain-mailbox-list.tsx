@@ -11,13 +11,14 @@ interface MailboxRow {
   warmup_day: number;
   sent_today: number;
   sent_this_month: number;
-  readiness: "ready" | "verifying" | "not_provisioned";
+  readiness: "ready" | "verifying" | "not_provisioned" | "sandbox";
 }
 
 const READINESS_LABEL: Record<MailboxRow["readiness"], { text: string; cls: string; title: string }> = {
   ready: { text: "Ready", cls: "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300", title: "Mailgun domain verified — can send and receive" },
   verifying: { text: "Verifying DNS", cls: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300", title: "Mailgun domain exists but is not verified yet — sending is blocked until it is" },
   not_provisioned: { text: "Not set up", cls: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300", title: "No Mailgun domain exists for this mailbox — sending is blocked" },
+  sandbox: { text: "Sandbox only", cls: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300", title: "This Mailgun domain is a sandbox — it can only deliver to pre-approved test addresses. Add a real domain in Mailgun." },
 };
 
 export default function DomainMailboxList({ mailboxes }: { mailboxes: MailboxRow[] }) {

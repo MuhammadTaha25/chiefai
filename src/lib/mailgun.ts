@@ -287,7 +287,7 @@ export async function createInboundRoute(_address: string, webhookUrl: string) {
   return res.json();
 }
 
-export type MailboxReadiness = "ready" | "verifying" | "not_provisioned";
+export type MailboxReadiness = "ready" | "verifying" | "not_provisioned" | "sandbox";
 
 const readinessCache = new Map<string, { at: number; value: MailboxReadiness }>();
 const READINESS_TTL_MS = 60_000;
@@ -311,7 +311,13 @@ export async function getMailboxReadiness(address: string): Promise<MailboxReadi
   let value: MailboxReadiness = "not_provisioned";
   if (res?.ok) {
     const data = await res.json().catch(() => null);
-    value = data?.domain?.state === "active" ? "ready" : "verifying";
+    // A Mailgun sandbox domain (the default on a fresh account, before a real domain is added) can only
+    // deliver to a short list of pre-approved test addresses — it reports "active" just like a real
+    // domain, so the state check alone treated it as send-ready. Campaign email then "sent successfully"
+    // (Mailgun accepted it) while almost no real lead ever received anything. "type" is "sandbox" on
+    // Mailgun's own domain object for exactly this case.
+    if (data?.domain?.type === "sandbox") value = "sandbox";
+    else value = data?.domain?.state === "active" ? "ready" : "verifying";
   }
   readinessCache.set(domain, { at: Date.now(), value });
   return value;

@@ -1,4 +1,4 @@
-import { reserveMailboxSlot, finalizeReservation, releaseReservation } from "@/lib/mailbox-readiness";
+import { reserveMailboxSlot, finalizeReservation, releaseReservation, effectiveDailyLimit, salesSendsToday } from "@/lib/mailbox-readiness";
 import { getClientBusinessContext, formatBusinessContext } from "@/lib/business-context";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { FORM_LEAD_SOURCE, autoSendSince } from "@/lib/campaign";
@@ -10,7 +10,6 @@ import { withUnsubscribeFooter, unsubscribeHeaders } from "@/lib/compliance";
 import { resolveFirstFollowUpDelayMs } from "@/lib/follow-up-config";
 import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
 
-const DAILY_INITIAL_SEND_LIMIT = 4;
 // The delay before the first follow-up check comes from follow-up-config.ts
 // (client-configurable via criteria.follow_up_delay_days, default 3 days) —
 // shared with follow-ups.ts so the two can never silently diverge.
@@ -44,17 +43,20 @@ interface EligibleLead {
   company: string | null;
   job_title: string | null;
   email: string;
+  campaign_id: string | null;
 }
 
 interface Mailbox {
   id: string;
   address: string;
+  daily_send_limit: number | null;
+  created_at: string;
 }
 
 /**
  * Sends today's batch of initial outreach emails for one client's active
- * monthly campaign — up to DAILY_INITIAL_SEND_LIMIT, one per eligible lead,
- * rotated across the client's own mailboxes only, with a randomized delay
+ * monthly campaign — up to the client's real remaining mailbox capacity today,
+ * one per eligible lead, rotated across the client's own mailboxes only, with a randomized delay
  * between sends. Never touches another client's mailbox or leads (every
  * query below is scoped to `clientId`, resolved server-side).
  */
@@ -80,18 +82,29 @@ export async function sendBatchForClient(clientId: string) {
     return { clientId, result: "skipped", detail: "no active campaign this month" };
   }
 
-  // Idempotent daily cap: counts sends already recorded today, so running
-  // this route twice in one day (retry, overlapping cron) never sends more
-  // than DAILY_INITIAL_SEND_LIMIT total — the cap is enforced against actual
-  // outreach_log rows, not an in-memory counter that resets per invocation.
-  const { count: sentToday } = await admin
-    .from("outreach_log")
-    .select("id", { count: "exact", head: true })
+  const { data: allMailboxes } = await admin
+    .from("mailboxes")
+    .select("id, address, daily_send_limit, created_at")
     .eq("client_id", clientId)
-    .eq("touch_number", 1)
-    .gte("sent_at", startOfToday.toISOString());
+    .returns<Mailbox[]>();
+  // Only mailboxes whose Mailgun domain is actually verified may send.
+  const mailboxes: Mailbox[] = [];
+  for (const m of allMailboxes ?? []) if ((await getMailboxReadiness(m.address)) === "ready") mailboxes.push(m);
 
-  const remaining = DAILY_INITIAL_SEND_LIMIT - (sentToday ?? 0);
+  if (!mailboxes || mailboxes.length === 0) {
+    // Never fall back to another client's mailbox (spec §3, §27).
+    return { clientId, campaignId: campaign.id, result: "skipped", detail: "no verified mailbox for this client" };
+  }
+
+  // Idempotent daily cap: this used to be a flat 4-per-day regardless of how many mailboxes the
+  // client actually has or their warmup-grown capacity — with several ready mailboxes it silently
+  // throttled real send volume to 4/day with leads showing "Queued" and no explanation. Now it's the
+  // sum of each ready mailbox's real remaining capacity today (reserveMailboxSlot enforces the
+  // per-mailbox share of this at send time; this just sizes how many leads this run even attempts).
+  const perMailboxRemaining = await Promise.all(
+    mailboxes.map(async (m) => Math.max(0, effectiveDailyLimit(m) - (await salesSendsToday(admin, m.id))))
+  );
+  const remaining = perMailboxRemaining.reduce((a, b) => a + b, 0);
   if (remaining <= 0) {
     return { clientId, campaignId: campaign.id, result: "skipped", detail: "daily limit already reached" };
   }
@@ -99,10 +112,28 @@ export async function sendBatchForClient(clientId: string) {
   // Only leads the client requested through the lead-gen form (and, when set, created after automation was
   // switched on) are auto-sent; leads saved by default elsewhere are never touched by the scheduler.
   const since = autoSendSince();
+  // A process crash/redeploy between "claim" (last_contact_at set) and "send" used to strand a lead
+  // forever: status stays "new" (so eligibleQuery below would still pick it up) but last_contact_at is
+  // already non-null, so the re-claim a few lines down always loses the .is("last_contact_at", null)
+  // race and skips it, every single run. Treat a "new" lead whose claim is older than 15 minutes as
+  // abandoned and release it back for this run to pick up again.
+  const STALE_CLAIM_MS = 15 * 60 * 1000;
+  await admin
+    .from("leads")
+    .update({ last_contact_at: null })
+    .eq("client_id", clientId)
+    .eq("status", "new")
+    .lt("last_contact_at", new Date(Date.now() - STALE_CLAIM_MS).toISOString());
+
+  // Leads are picked by client + source, never by which month's campaign row they happen to belong
+  // to — a lead created late in a month (or whose campaign got marked completed) used to sit
+  // unsent forever once the month rolled over, because this used to filter on campaign_id = this
+  // month's campaign. "Does an active campaign exist for this client right now" (checked above) still
+  // gates whether the client is actively sending at all; it just no longer limits WHICH leads qualify.
   let eligibleQuery = admin
     .from("leads")
-    .select("id, name, company, job_title, email")
-    .eq("campaign_id", campaign.id)
+    .select("id, name, company, job_title, email, campaign_id")
+    .eq("client_id", clientId)
     .eq("lead_source", FORM_LEAD_SOURCE)
     .eq("status", "new")
     .eq("unsubscribed", false)
@@ -118,20 +149,6 @@ export async function sendBatchForClient(clientId: string) {
 
   if (!eligibleLeads || eligibleLeads.length === 0) {
     return { clientId, campaignId: campaign.id, result: "skipped", detail: "no eligible leads" };
-  }
-
-  const { data: allMailboxes } = await admin
-    .from("mailboxes")
-    .select("id, address")
-    .eq("client_id", clientId)
-    .returns<Mailbox[]>();
-  // Only mailboxes whose Mailgun domain is actually verified may send.
-  const mailboxes: Mailbox[] = [];
-  for (const m of allMailboxes ?? []) if ((await getMailboxReadiness(m.address)) === "ready") mailboxes.push(m);
-
-  if (!mailboxes || mailboxes.length === 0) {
-    // Never fall back to another client's mailbox (spec §3, §27).
-    return { clientId, campaignId: campaign.id, result: "skipped", detail: "no verified mailbox for this client" };
   }
 
   const { data: job } = await admin
@@ -172,7 +189,7 @@ export async function sendBatchForClient(clientId: string) {
     const lead = eligibleLeads[i];
     // Mailbox choice + daily-limit enforcement live in reserveMailboxSlot (atomic); the random rotation
     // above is superseded by "first ready mailbox with capacity".
-    const reservation = await reserveMailboxSlot(admin, clientId, lead.id, { touch_number: 1, campaign_id: campaign.id });
+    const reservation = await reserveMailboxSlot(admin, clientId, lead.id, { touch_number: 1, campaign_id: lead.campaign_id ?? campaign.id });
     if (!reservation.ok) {
       sent.push({ leadId: lead.id, mailbox: "-", result: "failed", error: reservation.reason === "at_capacity" ? "mailbox daily limit reached" : "no ready mailbox" });
       break;

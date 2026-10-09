@@ -65,7 +65,7 @@ export type MailboxReservation =
  * Sales sends today for one mailbox. touch_number 0 (auto-replies to prospects) is excluded: replies are
  * not outbound prospecting, and the limit exists to protect cold-outreach volume.
  */
-async function salesSendsToday(admin: SupabaseClient, mailboxId: string): Promise<number> {
+export async function salesSendsToday(admin: SupabaseClient, mailboxId: string): Promise<number> {
   const { count } = await admin
     .from("outreach_log")
     .select("id", { count: "exact", head: true })

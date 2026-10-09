@@ -130,25 +130,42 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
         continue;
       }
 
-      const [{ data: client }, { data: job }] = await Promise.all([
+      const [{ data: client }, { data: jobs }] = await Promise.all([
         admin.from("clients").select("*").eq("id", lead.client_id).maybeSingle(),
         admin
           .from("lead_gen_jobs")
           .select("criteria")
           .eq("client_id", lead.client_id)
           .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle<{ criteria: Record<string, unknown> }>(),
+          .limit(20)
+          .returns<{ criteria: Record<string, unknown> }[]>(),
       ]);
+      // The latest job can be one a rejected/incomplete form left behind with no
+      // "what you sell" text — that used to switch off follow-ups for every due
+      // lead of the client at once. Walk back to the most recent job that
+      // actually has the text instead of trusting "latest == usable".
+      const job = (jobs ?? []).find((j) => (j.criteria?.what_you_sell as string | undefined)?.trim());
 
       const sellingDescription = (job?.criteria?.what_you_sell as string | undefined)?.trim();
       // A client can configure fewer follow-ups, never more than the spec's
       // hard system ceiling of 3 (§17).
       const maxFollowUps = Math.min(maxFollowUpsFor(job?.criteria?.follow_ups as string | undefined), HARD_MAX_FOLLOW_UPS);
-      const nextFollowUpNumber = (lead.follow_up_number ?? 0) + 1;
+      // follow_up_number is a TOUCH counter (1 = the initial email, set by send-batch.ts), not a
+      // follow-up counter — so the follow-up about to go out is ordinal (follow_up_number), not
+      // (follow_up_number + 1). Off by one here previously made "1 follow-up" send zero and "3"/"5"
+      // both send only two: e.g. after the initial email (touch 1), the real first follow-up was
+      // compared against the cap as if it were follow-up #2.
+      const nextFollowUpNumber = Math.max(1, lead.follow_up_number ?? 1);
 
-      if (!sellingDescription || nextFollowUpNumber > maxFollowUps) {
-        // Cap reached (or nothing to draft from) — stop scheduling further follow-ups.
+      if (!sellingDescription) {
+        // No usable job yet (e.g. mid-setup) is temporary, not a cap — retry this lead on the next
+        // run instead of switching its follow-ups off for good.
+        await admin.from("leads").update({ next_follow_up_at: lead.next_follow_up_at }).eq("id", lead.id).is("next_follow_up_at", null);
+        results.push({ leadId: lead.id, result: "skipped", detail: "no lead-gen job with a selling description yet" });
+        continue;
+      }
+      if (nextFollowUpNumber > maxFollowUps) {
+        // Cap reached — stop scheduling further follow-ups.
         await admin.from("leads").update({ next_follow_up_at: null }).eq("id", lead.id);
         results.push({ leadId: lead.id, result: "capped" });
         continue;
@@ -216,7 +233,7 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
           .from("leads")
           .update({
             status: `follow_up_${Math.min(nextFollowUpNumber, 10)}`,
-            follow_up_number: nextFollowUpNumber,
+            follow_up_number: nextFollowUpNumber + 1, // touch counter (initial email = 1), not the follow-up ordinal
             last_contact_at: new Date().toISOString(),
             next_follow_up_at:
               nextFollowUpNumber >= maxFollowUps
@@ -232,6 +249,11 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
         throw sendErr;
       }
     } catch (err) {
+      // The atomic claim above clears next_follow_up_at before drafting/sending. Any failure past that
+      // point (AI draft error, Mailgun error, DB error) must put it back, or this lead's sequence is
+      // silently over forever — nothing else will ever set a next_follow_up_at for it again. Guarded by
+      // .is(null) so this can't clobber a date a concurrent run already set.
+      await admin.from("leads").update({ next_follow_up_at: lead.next_follow_up_at }).eq("id", lead.id).is("next_follow_up_at", null);
       results.push({ leadId: lead.id, result: "error", detail: (err as Error).message });
     }
   }

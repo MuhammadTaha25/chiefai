@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyMailgunSignature } from "@/lib/webhook-security";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logEvent } from "@/lib/log-event";
 
 /**
  * Mailgun's own tracking-event webhook (complaint/unsubscribe — spec PHASE
@@ -63,18 +64,12 @@ export async function POST(req: NextRequest) {
       .maybeSingle<{ lead_id: string; client_id: string }>();
     if (sentRow?.lead_id) lead = { id: sentRow.lead_id, client_id: sentRow.client_id };
   }
+  // No fallback match-by-email-across-all-clients here: the same address can belong to two different
+  // clients' lead lists, and guessing would suppress/bounce-flag the WRONG client's lead based on an
+  // event that was actually about someone else's email entirely. Only the message-id match above (tied
+  // to an email THIS client's mailbox actually sent) is trusted to resolve the client.
   if (!lead) {
-    const { data: byEmail } = await admin
-      .from("leads")
-      .select("id, client_id")
-      .eq("email", recipient)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    lead = byEmail;
-  }
-
-  if (!lead) {
+    logEvent("mailgun.event_unmatched", { event: eventType, event_id: eventId, recipient });
     return NextResponse.json({ ok: true, matched_lead: false });
   }
 
@@ -84,12 +79,14 @@ export async function POST(req: NextRequest) {
     await admin
       .from("leads")
       .update({ complained: true, complained_at: new Date().toISOString(), next_follow_up_at: null })
-      .eq("id", lead.id);
+      .eq("id", lead.id)
+      .eq("client_id", lead.client_id);
   } else {
     await admin
       .from("leads")
       .update({ unsubscribed: true, unsubscribed_at: new Date().toISOString(), next_follow_up_at: null })
-      .eq("id", lead.id);
+      .eq("id", lead.id)
+      .eq("client_id", lead.client_id);
   }
 
   return NextResponse.json({ ok: true, event: isBounce ? "bounced" : eventType, leadId: lead.id });

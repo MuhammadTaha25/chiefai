@@ -106,6 +106,12 @@ export async function POST(req: NextRequest) {
   const sender = String(form.get("sender") ?? form.get("from") ?? "");
   const recipient = String(form.get("recipient") ?? "").trim().toLowerCase();
   const bodyPlain = String(form.get("body-plain") ?? "");
+  // Mailgun's own quote-stripped reply text (excludes the quoted original
+  // underneath, including our "reply unsubscribe" footer) — unsubscribe
+  // detection must only look at what the lead actually typed, never at
+  // quoted text from our own outbound email. Falls back to bodyPlain only
+  // if Mailgun didn't supply it (older/custom inbound configs).
+  const bodyStripped = String(form.get("stripped-text") ?? "") || bodyPlain;
   const inReplyTo = String(form.get("In-Reply-To") ?? form.get("in-reply-to") ?? "");
   const inboundSubject = String(form.get("Subject") ?? form.get("subject") ?? "");
 
@@ -317,7 +323,7 @@ export async function POST(req: NextRequest) {
     const history = await buildEmailHistory(admin, lead.client_id, lead.id, mailbox.id);
     const { classification, confidence, reason } = await classifyReply(bodyPlain, history || undefined);
 
-    if (isUnsubscribeRequest(bodyPlain)) {
+    if (isUnsubscribeRequest(bodyStripped)) {
       await admin
         .from("leads")
         .update({
