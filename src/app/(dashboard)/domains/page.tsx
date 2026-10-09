@@ -11,8 +11,6 @@ import DomainPurchaseHistory from "@/components/domain-purchase-history";
 import DomainLiveStatus from "@/components/domain-live-status";
 import DomainMailboxList from "@/components/domain-mailbox-list";
 import DomainMailboxAdd from "@/components/domain-mailbox-add";
-import DomainExternalSetup from "@/components/domain-external-setup";
-import DomainChoice from "@/components/domain-choice";
 import { getMailboxReadiness } from "@/lib/mailgun";
 
 interface DomainPurchaseRow {
@@ -149,7 +147,14 @@ export default async function DomainsPage(props: {
         payment goes through, and DNS/mailbox setup happens right after.
       </p>
 
-      <DomainChoice buyPanel={<DomainPurchasePanel />} existingPanel={<DomainExternalSetup />} />
+      {/*
+        "Use an existing domain" is temporarily disabled: the connected
+        Mailgun account's plan only allows 1 custom domain, so a real client
+        trying to connect their own domain right now would just fail or steal
+        the one domain slot another client needs — see SYSTEM_AUDIT.md.
+        Re-enable by restoring: <DomainChoice buyPanel={<DomainPurchasePanel />} existingPanel={<DomainExternalSetup />} />
+      */}
+      <DomainPurchasePanel />
 
       <DomainLiveStatus />
 
