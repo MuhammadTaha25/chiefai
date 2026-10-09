@@ -165,19 +165,21 @@ export async function validateProposals(call: FrontageCall, proposals: ProposedS
       } else keywordFallbacks.push(slug.replace(/_/g, " "));
     }
 
-    let city: string | null = null;
-    let cityKeyword: string | null = null;
-    if (prop.city) {
-      city = await canonicalCity(call, country, prop.city);
-      if (!city) cityKeyword = prop.city;
-    }
+    // A city is NEVER folded into a free-text `search` term — `search` matches a business's NAME,
+    // address and website too, so "city as keyword" previously let a business named e.g. "Tony O'Brien -
+    // Los Angeles Realtor" (actually located in Beverly Hills) or "...eXp of Greater Los Angeles, Inc."
+    // (actually in Buena Park) match purely because the city name appeared in their NAME, not because
+    // they're actually there. `canonicalCity` only checks the connector's "most common cities" shortlist,
+    // so a real but less-common city can still fail it — city is always passed as the connector's own
+    // `city` filter param (an exact-match field, per its own schema), canonical or not, and runPlans below
+    // additionally re-verifies every returned row's actual `city` field before accepting it.
+    const city = prop.city ? (await canonicalCity(call, country, prop.city)) ?? prop.city : null;
 
-    const withCity = (kw: string | null | undefined) => [kw, cityKeyword].filter(Boolean).join(" ");
     const filters: Record<string, unknown>[] = [
-      ...validCategories.map((category) => ({ category, ...(cityKeyword ? { search: cityKeyword } : {}) })),
-      ...keywordFallbacks.map((kw) => ({ search: withCity(kw) })),
+      ...validCategories.map((category) => ({ category })),
+      ...keywordFallbacks.map((kw) => ({ search: kw })),
     ];
-    if (!filters.length) filters.push(withCity(prop.search) ? { search: withCity(prop.search) } : {});
+    if (!filters.length) filters.push(prop.search ? { search: prop.search } : {});
     plans.push({ country, city, filters });
   }
   return { plans, unknown };
@@ -241,6 +243,12 @@ export async function runPlans(plans: FrontagePlan[], limit: number, call: Front
         const rows = (payload.leads as FrontageRow[] | undefined) ?? [];
         rowsScanned += rows.length;
         for (const r of rows) {
+          // Defense in depth, regardless of how this row was found (exact city param, category, or a
+          // free-text keyword search): a requested city must match the row's OWN city field exactly, not
+          // just appear somewhere in its name. "Tony O'Brien - Los Angeles Realtor" (actually Beverly
+          // Hills) or "...eXp of Greater Los Angeles, Inc." (actually Buena Park) are real rows the source
+          // itself returns for a free-text "Los Angeles" search — never accept one on a name match alone.
+          if (plan.city && r.city?.trim().toLowerCase() !== plan.city.trim().toLowerCase()) continue;
           const email = r.email?.trim().toLowerCase();
           if (!email || seen.has(email)) continue;
           seen.add(email);

@@ -67,7 +67,7 @@ function proposalCall(log: Log) {
     if (tool === "list_countries") return countries;
     if (tool === "list_categories") return { categories: ["dentist", "dental_clinic"].filter((c) => c.includes(String(args.contains))) };
     if (tool === "list_cities") return { cities: ["London", "Greater London"].filter((c) => c.toLowerCase().includes(String(args.contains).toLowerCase())) };
-    return { leads: [{ name: "Acme Dental", email: "hi@acme.co.uk" }] };
+    return { leads: [{ name: "Acme Dental", email: "hi@acme.co.uk", city: args.city }] };
   };
 }
 
@@ -98,7 +98,7 @@ test("AI cannot widen scope: a country the form did not name is ignored", async 
   assert.ok(countriesSearched.every((c) => c === "GB"));
 });
 
-test("a city the connector lacks becomes a keyword, never silently whole-country", async () => {
+test("a city the connector's shortlist lacks is still passed as the exact city filter, never folded into a name-matching keyword", async () => {
   const log: Log = [];
   await findProspectsViaFrontageLeads(
     { countries: ["GB"], cities: ["Narnia"], industries: [], keywords: [], limit: 3 },
@@ -106,8 +106,34 @@ test("a city the connector lacks becomes a keyword, never silently whole-country
     [{ country: "GB", city: "Narnia", categories: ["dentist"], search: null }]
   );
   const search = log.find((l) => l.tool === "search_leads")!;
-  assert.equal(search.args.city, undefined);
-  assert.equal(search.args.search, "Narnia");
+  // Folding an unmatched city into `search` used to match it against a business's NAME too — a company
+  // named "... of Greater Narnia" would wrongly match even if actually located elsewhere. The city always
+  // goes through the exact `city` param instead, canonical or not.
+  assert.equal(search.args.city, "Narnia");
+  assert.equal(search.args.search, undefined);
+});
+
+test("a row whose own city field doesn't exactly match the requested city is dropped, even if it matched on name/category", async () => {
+  const log: Log = [];
+  const wrongCityCall = async (tool: string, args: Record<string, unknown>) => {
+    log.push({ tool, args });
+    if (tool === "list_countries") return countries;
+    if (tool === "list_categories") return { categories: ["real_estate_agent"] };
+    if (tool === "list_cities") return { cities: ["Los Angeles"] };
+    return {
+      leads: [
+        { name: "Real LA Realty", email: "real@la.com", city: "Los Angeles" },
+        { name: "Tony - Los Angeles Realtor", email: "tony@bh.com", city: "Beverly Hills" },
+      ],
+    };
+  };
+  const { prospects } = await findProspectsViaFrontageLeads(
+    { countries: ["US"], cities: ["Los Angeles"], industries: ["real estate"], keywords: [], limit: 10 },
+    wrongCityCall,
+    [{ country: "US", city: "Los Angeles", categories: ["real_estate_agent"], search: null }]
+  );
+  assert.equal(prospects.length, 1);
+  assert.equal(prospects[0].email, "real@la.com");
 });
 
 test("a category the connector lacks is kept as a keyword search, not lost", async () => {
