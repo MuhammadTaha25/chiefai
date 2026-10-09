@@ -34,14 +34,14 @@ test("countries resolve by name, code and UK alias; unknown is reported", async 
 
 test("filters reach search_leads and results change with them", async () => {
   const log: Log = [];
-  const a = await findProspectsViaFrontageLeads({ countries: ["United States"], cities: [], industries: ["real estate"], keywords: [], limit: 5 }, fakeCall(log));
+  const a = (await findProspectsViaFrontageLeads({ countries: ["United States"], cities: [], industries: ["real estate"], keywords: [], limit: 5 }, fakeCall(log))).prospects;
   const first = log.find((l) => l.tool === "search_leads")!;
   assert.equal(first.args.country, "US");
   assert.equal(first.args.category, "real_estate_agency");
   assert.equal(first.args.has_email, true);
 
   log.length = 0;
-  const b = await findProspectsViaFrontageLeads({ countries: ["United Kingdom"], cities: ["London"], industries: ["dentists"], keywords: [], limit: 5 }, fakeCall(log));
+  const b = (await findProspectsViaFrontageLeads({ countries: ["United Kingdom"], cities: ["London"], industries: ["dentists"], keywords: [], limit: 5 }, fakeCall(log))).prospects;
   const second = log.find((l) => l.tool === "search_leads")!;
   assert.equal(second.args.country, "GB");
   assert.equal(second.args.city, "London");
@@ -50,7 +50,7 @@ test("filters reach search_leads and results change with them", async () => {
 });
 
 test("dedupes emails case-insensitively and respects the limit", async () => {
-  const out = await findProspectsViaFrontageLeads({ countries: ["GB"], cities: [], industries: [], keywords: [], limit: 1 }, fakeCall([]));
+  const { prospects: out } = await findProspectsViaFrontageLeads({ countries: ["GB"], cities: [], industries: [], keywords: [], limit: 1 }, fakeCall([]));
   assert.equal(out.length, 1);
   assert.equal(out[0].email, "x@gb.com");
   assert.equal(out[0].name, "GB-all-any");
@@ -73,7 +73,7 @@ function proposalCall(log: Log) {
 
 test("AI proposals are validated: bad slugs dropped, city spelled as the connector has it", async () => {
   const log: Log = [];
-  const out = await findProspectsViaFrontageLeads(
+  const { prospects: out } = await findProspectsViaFrontageLeads(
     { countries: ["United Kingdom"], cities: ["london"], industries: ["dentists"], keywords: [], limit: 3 },
     proposalCall(log),
     [{ country: "GB", city: "london", categories: ["dentist", "made_up_slug"], search: null }]

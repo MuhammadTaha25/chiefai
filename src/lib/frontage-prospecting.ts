@@ -203,12 +203,31 @@ export async function plansFromForm(query: FrontageQuery, call: FrontageCall): P
   return plans;
 }
 
-export async function runPlans(plans: FrontagePlan[], limit: number, call: FrontageCall): Promise<ProspectResult[]> {
+export interface RunPlansResult {
+  prospects: ProspectResult[];
+  /** How many raw rows the source actually returned this run (regardless of dedup) — the caller advances
+   * its stored cursor by this, so the NEXT run with the same criteria starts past everything just scanned. */
+  rowsScanned: number;
+  /** True once every filter ran out of rows (hit a page shorter than requested) — the search is exhausted,
+   * so the caller should reset its cursor to 0 instead of advancing it past the end forever. */
+  exhausted: boolean;
+}
+
+/**
+ * `baseOffset` shifts every filter's pagination forward by a flat amount — set from a cursor persisted per
+ * (client, search criteria) so resubmitting the same Find Leads form continues from where the last search
+ * left off instead of re-fetching the same top results every time (which then all get deduped away against
+ * already-saved leads, looking like the search "does nothing" on a repeat run).
+ */
+export async function runPlans(plans: FrontagePlan[], limit: number, call: FrontageCall, baseOffset = 0): Promise<RunPlansResult> {
   const seen = new Set<string>();
   const out: ProspectResult[] = [];
+  let rowsScanned = 0;
+  let allFiltersExhausted = true;
 
   outer: for (const plan of plans) {
     for (const filter of plan.filters) {
+      let filterExhausted = false;
       for (let page = 0; page < MAX_PAGES; page++) {
         const pageSize = Math.min(PAGE_SIZE, Math.max((limit - out.length) * 2, 10));
         const payload = await call("search_leads", {
@@ -217,9 +236,10 @@ export async function runPlans(plans: FrontagePlan[], limit: number, call: Front
           ...(plan.city ? { city: plan.city } : {}),
           ...filter,
           limit: pageSize,
-          offset: page * pageSize,
+          offset: baseOffset + page * pageSize,
         });
         const rows = (payload.leads as FrontageRow[] | undefined) ?? [];
+        rowsScanned += rows.length;
         for (const r of rows) {
           const email = r.email?.trim().toLowerCase();
           if (!email || seen.has(email)) continue;
@@ -228,11 +248,15 @@ export async function runPlans(plans: FrontagePlan[], limit: number, call: Front
           out.push({ name, email, company: name, jobTitle: null });
           if (out.length >= limit) break outer;
         }
-        if (rows.length < pageSize) break;
+        if (rows.length < pageSize) {
+          filterExhausted = true;
+          break;
+        }
       }
+      if (!filterExhausted) allFiltersExhausted = false;
     }
   }
-  return out;
+  return { prospects: out, rowsScanned, exhausted: allFiltersExhausted };
 }
 
 /**
@@ -242,8 +266,9 @@ export async function runPlans(plans: FrontagePlan[], limit: number, call: Front
 export async function findProspectsViaFrontageLeads(
   query: FrontageQuery,
   call: FrontageCall,
-  proposals?: ProposedSearch[]
-): Promise<ProspectResult[]> {
+  proposals?: ProposedSearch[],
+  baseOffset = 0
+): Promise<RunPlansResult> {
   let plans: FrontagePlan[] = [];
   if (proposals?.length) {
     // The AI may only narrow, never widen: drop any proposed country the form did not name.
@@ -256,5 +281,5 @@ export async function findProspectsViaFrontageLeads(
     plans = (await validateProposals(call, inScope)).plans;
   }
   if (!plans.length) plans = await plansFromForm(query, call);
-  return runPlans(plans, query.limit, call);
+  return runPlans(plans, query.limit, call, baseOffset);
 }

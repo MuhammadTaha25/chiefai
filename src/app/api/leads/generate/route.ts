@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentClient } from "@/lib/get-current-client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { analyzeLeadCriteria } from "@/lib/gemini";
-import { findProspects, isExploriumConfigured } from "@/lib/explorium";
+import { findProspects, isExploriumConfigured, type ProspectResult } from "@/lib/explorium";
 import { resolveAppOrigin } from "@/lib/app-url";
 import { isLeadsMcpConnected, getRedirectUri as getLeadsRedirectUri } from "@/lib/leads-mcp";
 import { frontageCallerFor } from "@/lib/frontage-caller";
@@ -144,33 +144,63 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const prospects = frontageReady
-      ? await findProspectsViaFrontageLeads(
-          {
-            countries: toList(criteria.target_countries),
-            cities: toList(criteria.target_cities),
-            industries: targetIndustries.length ? targetIndustries : analysis.industries,
-            keywords: analysis.keywords,
-            limit: leadCount,
-          },
-          frontageCallerFor(getLeadsRedirectUri(resolveAppOrigin(req, { preferEnv: false }))),
-          proposals
-        )
-      : vibeReady
-      ? await findProspectsViaVibeProspecting({
-          industries: analysis.industries,
-          companySizeRange,
-          jobTitles: analysis.jobTitles,
-          keywords: analysis.keywords,
-          limit: leadCount,
-        })
-      : await findProspects({
-          industries: analysis.industries,
-          companySizeRange,
-          jobTitles: analysis.jobTitles,
-          keywords: analysis.keywords,
-          limit: leadCount,
-        });
+    let prospects: ProspectResult[];
+    // Resubmitting the exact same Find Leads form used to always re-fetch the same top results from the
+    // source (offset always started at 0), which then all got deduped away against leads already saved
+    // from the LAST run — the search looked like it "did nothing" on a repeat. A cursor persisted per
+    // (client, exact search criteria) lets a repeat search continue past everything already scanned.
+    let frontageSearchKey: string | null = null;
+    if (frontageReady) {
+      const frontageQuery = {
+        countries: toList(criteria.target_countries),
+        cities: toList(criteria.target_cities),
+        industries: targetIndustries.length ? targetIndustries : analysis.industries,
+        keywords: analysis.keywords,
+        limit: leadCount,
+      };
+      frontageSearchKey = JSON.stringify({
+        countries: [...frontageQuery.countries].sort(),
+        cities: [...frontageQuery.cities].sort(),
+        industries: [...frontageQuery.industries].sort(),
+      });
+      const { data: cursorRow } = await admin
+        .from("prospect_search_cursors")
+        .select("next_offset")
+        .eq("client_id", client.id)
+        .eq("search_key", frontageSearchKey)
+        .maybeSingle<{ next_offset: number }>();
+
+      const result = await findProspectsViaFrontageLeads(
+        frontageQuery,
+        frontageCallerFor(getLeadsRedirectUri(resolveAppOrigin(req, { preferEnv: false }))),
+        proposals,
+        cursorRow?.next_offset ?? 0
+      );
+      prospects = result.prospects;
+      const newOffset = result.exhausted ? 0 : (cursorRow?.next_offset ?? 0) + result.rowsScanned;
+      await admin
+        .from("prospect_search_cursors")
+        .upsert(
+          { client_id: client.id, search_key: frontageSearchKey, next_offset: newOffset, updated_at: new Date().toISOString() },
+          { onConflict: "client_id,search_key" }
+        );
+    } else if (vibeReady) {
+      prospects = await findProspectsViaVibeProspecting({
+        industries: analysis.industries,
+        companySizeRange,
+        jobTitles: analysis.jobTitles,
+        keywords: analysis.keywords,
+        limit: leadCount,
+      });
+    } else {
+      prospects = await findProspects({
+        industries: analysis.industries,
+        companySizeRange,
+        jobTitles: analysis.jobTitles,
+        keywords: analysis.keywords,
+        limit: leadCount,
+      });
+    }
 
     // Never re-insert (and so never re-email) someone this client already has:
     // dedupe against existing leads (any case) and within this batch.

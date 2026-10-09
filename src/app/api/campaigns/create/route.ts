@@ -189,16 +189,18 @@ export async function POST(req: NextRequest) {
   let prospects;
   try {
     prospects = useFrontage
-      ? await findProspectsViaFrontageLeads(
-          {
-            countries: formCountries,
-            cities: formCities,
-            industries: formIndustries.length ? formIndustries : query.industries,
-            keywords: query.keywords,
-            limit: MONTHLY_LEAD_TARGET,
-          },
-          frontageCallerFor(getLeadsRedirectUri(resolveAppOrigin(req, { preferEnv: false })))
-        )
+      ? (
+          await findProspectsViaFrontageLeads(
+            {
+              countries: formCountries,
+              cities: formCities,
+              industries: formIndustries.length ? formIndustries : query.industries,
+              keywords: query.keywords,
+              limit: MONTHLY_LEAD_TARGET,
+            },
+            frontageCallerFor(getLeadsRedirectUri(resolveAppOrigin(req, { preferEnv: false })))
+          )
+        ).prospects
       : await findProspectsViaVibeProspecting(query);
   } catch (err) {
     // No fake leads on failure (spec §7, §50) — record the failure and leave
