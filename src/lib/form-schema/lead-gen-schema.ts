@@ -111,7 +111,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
       {
         id: "company_size",
         label: "Company size",
-        help: "Choose the approximate number of people working at the company.",
+        help: "Choose the approximate number of people working at the company. (AI preference, not a guaranteed filter.)",
         type: "select",
         options: EMPLOYEE_RANGES,
         allowCustom: true,
@@ -119,7 +119,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
       {
         id: "annual_revenue",
         label: "Annual revenue",
-        help: "Approximate yearly company income.",
+        help: "Approximate yearly company income. (AI preference, not a guaranteed filter.)",
         type: "select",
         options: REVENUE_RANGES,
         allowAI: true,
@@ -127,14 +127,14 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
       {
         id: "company_age",
         label: "How old should the company be?",
-        help: "New startups and established companies may need different solutions.",
+        help: "New startups and established companies may need different solutions. (AI preference, not a guaranteed filter.)",
         type: "select",
         options: sameOpts(["Less than 1 year", "1–3 years", "3–5 years", "5–10 years", "10–20 years", "20+ years", "Any age"]),
       },
       {
         id: "company_stage",
         label: "Company stage",
-        help: "Choose the type of company you want to sell to.",
+        help: "Choose the type of company you want to sell to. (AI preference, not a guaranteed filter.)",
         type: "select",
         options: sameOpts(["Startup", "Small Business", "Growing Business", "Mid-Market", "Enterprise", "Any"]),
         allowAI: true,
@@ -142,7 +142,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
       {
         id: "num_locations",
         label: "Number of locations",
-        help: "How many offices or branches should the company have? Leave as 'Any' if this doesn't matter.",
+        help: "How many offices or branches should the company have? Leave as 'Any' if this doesn't matter. (AI preference, not a guaranteed filter.)",
         type: "select",
         options: sameOpts(["1", "2–5", "6–10", "11–50", "50+", "Any"]),
       },
@@ -164,7 +164,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
       {
         id: "target_states",
         label: "Target state / region",
-        help: "Narrow it down further, or leave empty to cover the whole country.",
+        help: "Narrow it down further, or leave empty to cover the whole country. (AI preference, not a guaranteed filter; country and city are the ones we guarantee.)",
         type: "multiselect",
         options: statesForCountries,
         showIf: (v) => Array.isArray(v.target_countries) && (v.target_countries as string[]).length > 0,
@@ -179,7 +179,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
       {
         id: "location_scope",
         label: "Where should the company be located?",
-        help: "Some companies have one head office but branches elsewhere — tell us which locations count.",
+        help: "Some companies have one head office but branches elsewhere, tell us which locations count. (AI preference, not a guaranteed filter.)",
         type: "select",
         options: opts([
           ["hq", "Company headquarters only"],
@@ -204,7 +204,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
       {
         id: "growth_rate",
         label: "Should the company be growing?",
-        help: "Fast-growing companies often have more budget and urgency to buy.",
+        help: "Fast-growing companies often have more budget and urgency to buy. (AI preference, not a guaranteed filter.)",
         type: "select",
         options: sameOpts(["Fast-growing", "Moderately growing", "Stable", "Any"]),
         allowAI: true,
@@ -212,7 +212,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
       {
         id: "hiring_status",
         label: "Should they be hiring?",
-        help: "Companies that are hiring are usually growing and investing in new tools.",
+        help: "Companies that are hiring are usually growing and investing in new tools. (AI preference, not a guaranteed filter.)",
         type: "select",
         options: opts([
           ["actively", "Yes, actively hiring"],
@@ -224,7 +224,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
       {
         id: "hiring_departments",
         label: "Which departments should be hiring?",
-        help: "Pick the departments that would signal a good time to reach out.",
+        help: "Pick the departments that would signal a good time to reach out. (AI preference, not a guaranteed filter.)",
         type: "multiselect",
         options: sameOpts(["Sales", "Marketing", "IT", "Engineering", "AI", "HR", "Finance", "Operations", "Product"]),
         allowCustom: true,
@@ -233,14 +233,14 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
       {
         id: "recent_expansion",
         label: "Recent expansion",
-        help: "Companies opening new locations or entering new markets often need new services.",
+        help: "Companies opening new locations or entering new markets often need new services. (AI preference, not a guaranteed filter.)",
         type: "select",
         options: sameOpts(["Recently expanded", "Opening new locations", "Entering new markets", "No preference"]),
       },
       {
         id: "recent_activity",
         label: "Recent company activity",
-        help: "Any recent news that suggests the company is a good time to contact.",
+        help: "Any recent news that suggests the company is a good time to contact. (AI preference, not a guaranteed filter.)",
         type: "multiselect",
         options: sameOpts(["New product launch", "New office", "New leadership", "Funding", "Expansion", "Hiring"]),
         allowAI: true,
@@ -250,19 +250,19 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
   {
     id: "funding",
     title: "Funding",
-    intro: "Optional — skip this if funding doesn't matter for your product.",
+    intro: "Optional, skip this if funding doesn't matter for your product.",
     fields: [
       {
         id: "funding_status",
         label: "Funding status",
-        help: "Some products are only useful for companies that have raised outside investment.",
+        help: "Some products are only useful for companies that have raised outside investment. (AI preference, not a guaranteed filter.)",
         type: "select",
         options: sameOpts(["Bootstrapped", "Funded", "No preference"]),
       },
       {
         id: "funding_stage",
         label: "Funding stage",
-        help: "How far along their fundraising should they be?",
+        help: "How far along their fundraising should they be? (AI preference, not a guaranteed filter.)",
         type: "select",
         options: sameOpts(["Pre-seed", "Seed", "Series A", "Series B", "Series C+", "Any"]),
         showIf: (v) => v.funding_status === "Funded",
@@ -270,7 +270,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
       {
         id: "recently_funded",
         label: "Recently funded?",
-        help: "Companies that just raised money often have fresh budget to spend.",
+        help: "Companies that just raised money often have fresh budget to spend. (AI preference, not a guaranteed filter.)",
         type: "select",
         options: sameOpts(["Last 3 months", "Last 6 months", "Last 12 months", "Any time", "No preference"]),
         showIf: (v) => v.funding_status === "Funded",
@@ -294,7 +294,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
       {
         id: "contact_department",
         label: "Department",
-        help: "Which department does this person usually work in?",
+        help: "Which department does this person usually work in? (AI preference, not a guaranteed filter.)",
         type: "select",
         options: sameOpts(["Management", "Sales", "Marketing", "IT", "Engineering", "HR", "Finance", "Operations", "Product", "Customer Success"]),
         allowCustom: true,
@@ -308,7 +308,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
       {
         id: "good_customer_description",
         label: "What makes someone a good customer?",
-        help: "Describe your ideal customer in your own words — this helps the AI understand what to look for.",
+        help: "Describe your ideal customer in your own words, this helps the AI understand what to look for. (AI preference, not a guaranteed filter.)",
         example: "A company with 50–500 employees that is growing quickly and needs AI automation.",
         type: "textarea",
         allowAI: true,
@@ -316,7 +316,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
       {
         id: "customer_problems",
         label: "What problem should they have?",
-        help: "What is the customer struggling with that your product or service solves?",
+        help: "What is the customer struggling with that your product or service solves? (AI preference, not a guaranteed filter.)",
         type: "multiselect",
         options: sameOpts(["Need more sales", "Need automation", "Need software", "Need employees", "Need marketing", "Outdated website", "High operating costs", "Need AI", "Need more customers"]),
         allowCustom: true,
@@ -324,7 +324,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
       {
         id: "exclude_lead_types",
         label: "Who should NOT be a lead?",
-        help: "Any type of company or person we should skip entirely.",
+        help: "Any type of company or person we should skip entirely. (AI preference, not a guaranteed filter; for a hard guarantee, use 'Places to exclude' for locations.)",
         example: "Do not target freelancers, students or companies with fewer than 10 employees.",
         type: "tags",
       },
@@ -337,13 +337,13 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
       {
         id: "has_existing_customers",
         label: "Do you already have good customers?",
-        help: "If you give us examples, AI can find more companies just like them.",
+        help: "If you give us examples, AI can find more companies just like them. (AI preference, not a guaranteed filter.)",
         type: "yesno",
       },
       {
         id: "example_customers",
         label: "Add example customer companies",
-        help: "Give us companies you already consider good customers. AI can use them to find similar businesses.",
+        help: "Give us companies you already consider good customers. AI can use them to find similar businesses. (AI preference, not a guaranteed filter.)",
         example: "HubSpot, Salesforce, Monday.com",
         type: "tags",
         showIf: (v) => v.has_existing_customers === "yes",
@@ -379,7 +379,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
       {
         id: "lead_quality",
         label: "Minimum lead quality",
-        help: "Stricter quality means fewer, better-matched leads. Looser means more leads, some less relevant.",
+        help: "Stricter quality means fewer, better-matched leads. Looser means more leads, some less relevant. (AI preference, not a guaranteed filter.)",
         type: "select",
         options: sameOpts(["Any relevant lead", "Good", "Very good", "Only high-quality leads"]),
         allowAI: true,
@@ -387,7 +387,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
       {
         id: "contact_details_needed",
         label: "What contact details do you need?",
-        help: "Choose everything you'd like us to try to find for each lead.",
+        help: "Choose everything you'd like us to try to find for each lead. (AI preference, not a guaranteed filter; email is always required for outreach.)",
         type: "multiselect",
         options: sameOpts(["Verified email", "Phone", "LinkedIn", "Website", "Company details"]),
       },
