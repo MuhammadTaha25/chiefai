@@ -20,21 +20,27 @@ export default function SignupPage() {
     setError(null);
 
     const supabase = createClient();
-    const { data, error } = await supabase.auth.signUp({ email, password });
+    const { error } = await supabase.auth.signUp({ email, password });
 
-    setLoading(false);
     if (error) {
+      setLoading(false);
       setError(error.message);
       return;
     }
 
-    if (!data.session) {
+    const sendRes = await fetch("/api/auth/signup/send-code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+
+    setLoading(false);
+    if (!sendRes.ok) {
       setNeedsConfirmation(true);
       return;
     }
 
-    router.push("/onboarding");
-    router.refresh();
+    router.push(`/verify-email?email=${encodeURIComponent(email)}`);
   }
 
   if (needsConfirmation) {
@@ -43,11 +49,9 @@ export default function SignupPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Check your email</h1>
           <p className="mt-2 max-w-sm text-zinc-600 dark:text-zinc-400">
-            We sent a confirmation link to {email}. Click it, then come back and log in.
+            Your account was created, but we couldn&apos;t send a verification code right now. Please{" "}
+            <Link href="/login" className="font-medium underline">log in</Link> and try again, or contact support.
           </p>
-          <Link href="/login" className="mt-6 inline-block font-medium underline">
-            Go to login
-          </Link>
         </div>
       </div>
     );
