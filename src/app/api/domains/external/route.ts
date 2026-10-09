@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { resolveAppOrigin } from "@/lib/app-url";
 import { getCurrentClient } from "@/lib/get-current-client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createMailgunDomain, getMailgunDnsRecords } from "@/lib/mailgun";
-import { startOwnershipChallenge } from "@/lib/domain-ownership";
+import { startOwnershipChallenge, checkOwnershipChallenge } from "@/lib/domain-ownership";
+import { getPortfolioEntry, provisionOwnershipTxtRecord, provisionMailgunDnsRecords, ensureDmarcRecord } from "@/lib/hostinger";
+import { ensureDomainProvisioned } from "@/lib/domain-provisioning";
 
 /**
  * Registers a domain the client already owns elsewhere (not bought through
@@ -30,6 +33,7 @@ import { startOwnershipChallenge } from "@/lib/domain-ownership";
  */
 export async function POST(req: NextRequest) {
   const { user, client } = await getCurrentClient();
+  const publicOrigin = resolveAppOrigin(req);
   if (!user || !client) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
@@ -73,15 +77,48 @@ export async function POST(req: NextRequest) {
   try {
     await createMailgunDomain(normalizedDomain);
     const records = await getMailgunDnsRecords(normalizedDomain);
+
+    const ownership = challenge.alreadyOwned
+      ? ({ owned: true as const })
+      : ({ owned: false as const, hostname: challenge.hostname, token: challenge.token, expiresAt: challenge.expiresAtISO });
+
+    // If this exact domain already sits in OUR connected Hostinger account's
+    // portfolio, we genuinely control its DNS zone — write every record
+    // ourselves instead of making the client copy records into a DNS panel
+    // they don't actually need to touch. Any other domain (a different
+    // registrar, or someone else's Hostinger account) still gets the
+    // show-the-records-and-wait flow; we only ever write DNS we can prove
+    // via the API we actually own.
+    const portfolioEntry = await getPortfolioEntry(normalizedDomain).catch(() => null);
+    if (!portfolioEntry) {
+      return NextResponse.json({ ok: true, domain: normalizedDomain, records, ownership, autoProvisioned: false });
+    }
+
+    if (!challenge.alreadyOwned && challenge.hostname && challenge.token) {
+      await provisionOwnershipTxtRecord(normalizedDomain, challenge.hostname, challenge.token);
+    }
+    const mailgunWrite = await provisionMailgunDnsRecords(normalizedDomain, normalizedDomain, records);
+    await ensureDmarcRecord(normalizedDomain).catch(() => "failed" as const);
+
+    // Re-check ownership now that we just wrote the TXT record ourselves,
+    // then fall through to the same Mailgun/SPF/DKIM/MX verification every
+    // other domain path uses — never assume our own write succeeded just
+    // because the API call didn't throw (see addZoneRecordAndVerify).
+    const ownershipCheck = await checkOwnershipChallenge(admin, client.id, normalizedDomain);
+    let verifyState: string | null = null;
+    if (ownershipCheck.ok) {
+      const result = await ensureDomainProvisioned(admin, { clientId: client.id, domain: normalizedDomain, publicOrigin, verifyAttempts: 1 });
+      verifyState = result.state;
+    }
+
     return NextResponse.json({
       ok: true,
       domain: normalizedDomain,
       records,
-      // Present even when `alreadyOwned` is true as `ownership: { owned: true }` below,
-      // so the UI can always render a consistent shape.
-      ownership: challenge.alreadyOwned
-        ? { owned: true as const }
-        : { owned: false as const, hostname: challenge.hostname, token: challenge.token, expiresAt: challenge.expiresAtISO },
+      ownership: ownershipCheck.ok ? { owned: true as const } : ownership,
+      autoProvisioned: true,
+      autoProvisionedAllConfirmed: mailgunWrite.allConfirmed,
+      verifyState,
     });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });

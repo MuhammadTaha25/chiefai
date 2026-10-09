@@ -291,6 +291,21 @@ export async function provisionMailgunDnsRecords(
   return { allConfirmed: failures.length === 0, failures };
 }
 
+/**
+ * Writes OUR OWN domain-ownership TXT challenge record (see
+ * domain-ownership-core.ts) into a Hostinger zone we actually control — only
+ * called when the domain being connected via "I already have a domain" turns
+ * out to already sit in this same Hostinger account's portfolio (see
+ * getPortfolioEntry). Never called for a domain registered elsewhere; that
+ * path still requires the client to add it themselves.
+ */
+export async function provisionOwnershipTxtRecord(rootDomain: string, hostname: string, token: string): Promise<boolean> {
+  const suffix = `.${rootDomain}`;
+  const name = hostname.replace(/\.$/, "");
+  const relativeName = name.toLowerCase() === rootDomain.toLowerCase() ? "@" : name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
+  return addZoneRecordAndVerify(rootDomain, { type: "TXT", name: relativeName, ttl: 3600, records: [{ content: `"${token}"` }] }).catch(() => false);
+}
+
 interface HostingerPaymentMethod {
   id: number;
   identifier?: string;

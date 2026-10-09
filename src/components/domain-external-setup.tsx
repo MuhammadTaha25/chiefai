@@ -54,6 +54,7 @@ export default function DomainExternalSetup() {
   const [ownership, setOwnership] = useState<OwnershipChallenge | null>(null);
   const [activeDomain, setActiveDomain] = useState<string | null>(null);
   const [verifyState, setVerifyState] = useState<string | null>(null);
+  const [autoProvisioned, setAutoProvisioned] = useState(false);
 
   async function handleStart(e: React.FormEvent) {
     e.preventDefault();
@@ -72,7 +73,9 @@ export default function DomainExternalSetup() {
       setRecords(data.records);
       setOwnership(data.ownership ?? null);
       setActiveDomain(data.domain ?? clean);
-      setVerifyState(null);
+      setAutoProvisioned(Boolean(data.autoProvisioned));
+      setVerifyState(data.autoProvisioned ? (data.verifyState ?? null) : null);
+      if (data.autoProvisioned && data.verifyState === "active") router.refresh();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -141,7 +144,34 @@ export default function DomainExternalSetup() {
         <p className="rounded-md bg-red-50 p-3 text-sm text-red-800 dark:bg-red-950 dark:text-red-300">{error}</p>
       )}
 
-      {records && activeDomain && (
+      {records && activeDomain && autoProvisioned && (
+        <div className="space-y-3">
+          <p className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+            {activeDomain} is already in your connected Hostinger account, so we added every DNS record
+            (ownership, SPF/DKIM, MX, DMARC) for you automatically — nothing to copy anywhere.
+          </p>
+          {verifyInfo && (
+            <p
+              className={`text-sm ${
+                verifyInfo.tone === "ok" ? "text-green-700 dark:text-green-400" : verifyInfo.tone === "error" ? "text-red-700 dark:text-red-400" : "text-zinc-500"
+              }`}
+            >
+              {verifyInfo.text}
+            </p>
+          )}
+          {verifyState && verifyState !== "active" && (
+            <button
+              onClick={handleVerify}
+              disabled={busy}
+              className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:bg-[#383838] disabled:opacity-50 dark:hover:bg-[#ccc]"
+            >
+              {busy ? "Checking…" : "Check again"}
+            </button>
+          )}
+        </div>
+      )}
+
+      {records && activeDomain && !autoProvisioned && (
         <div className="space-y-4">
           <p className="text-sm text-zinc-500">
             Add these records at {activeDomain}&apos;s DNS provider (your registrar, or wherever its
