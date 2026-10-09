@@ -60,6 +60,10 @@ export interface SectionConfig {
   intro?: string;
   fields: FieldConfig[];
   showIf?: (values: FormValues) => boolean;
+  /** No field in this section is required, and none affect the actual lead search (AI context only) —
+   * DynamicForm groups every such section behind a single "fine-tune further?" opt-in after the core
+   * steps, instead of forcing the client through each one as a mandatory wizard step. */
+  optional?: boolean;
 }
 
 export const AI_DECIDE = "__ai_decide__";

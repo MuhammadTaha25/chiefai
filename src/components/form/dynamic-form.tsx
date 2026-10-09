@@ -90,7 +90,24 @@ export function DynamicForm({
     () => sections.filter((s) => !s.showIf || s.showIf(values)),
     [sections, values]
   );
-  const section = visibleSections[step];
+
+  // Every field in an `optional` section is non-required AI context, not something that changes whether
+  // the search even runs — forcing a client through each one as its own mandatory wizard step made the
+  // form feel long before they ever reached something that actually mattered. Core sections stay a normal
+  // step-by-step flow; every optional section is grouped behind a single "add more detail?" opt-in after
+  // them, so the default path is short and fine-tuning is there for whoever wants it.
+  type WizardItem = { kind: "section"; section: SectionConfig } | { kind: "interstitial" };
+  const items = useMemo<WizardItem[]>(() => {
+    const core = visibleSections.filter((s) => !s.optional);
+    const advanced = visibleSections.filter((s) => s.optional);
+    return [
+      ...core.map((section) => ({ kind: "section" as const, section })),
+      ...(advanced.length ? [{ kind: "interstitial" as const }] : []),
+      ...advanced.map((section) => ({ kind: "section" as const, section })),
+    ];
+  }, [visibleSections]);
+  const current = items[step];
+  const section = current?.kind === "section" ? current.section : undefined;
 
   function set(id: string, value: unknown) {
     setValues((v) => ({ ...v, [id]: value }));
@@ -189,18 +206,76 @@ export function DynamicForm({
     );
   }
 
+  if (!current) return null;
+
+  const isLast = step === items.length - 1;
+  const inAdvanced = section?.optional === true;
+
+  if (current.kind === "interstitial") {
+    return (
+      <div className="mx-auto max-w-xl">
+        <div className="mb-6 flex gap-1.5">
+          {items.map((it, i) => (
+            <div
+              key={it.kind === "section" ? it.section.id : "interstitial"}
+              className={`h-1.5 flex-1 rounded-full ${i <= step ? "bg-foreground" : "bg-zinc-200 dark:bg-zinc-800"}`}
+            />
+          ))}
+        </div>
+
+        <h1 className="mt-1 text-2xl font-semibold tracking-tight">Want to fine-tune your search?</h1>
+        <p className="mt-1.5 text-sm text-zinc-500">
+          Everything from here is optional. It helps the AI narrow things down further, but your search works fine without it.
+        </p>
+
+        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+
+        <div className="mt-8 flex justify-between">
+          <button
+            type="button"
+            onClick={() => setStep((s) => Math.max(0, s - 1))}
+            className="rounded-full border border-zinc-200 px-5 py-2.5 text-sm font-medium dark:border-zinc-800"
+          >
+            Back
+          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setReviewing(true)}
+              className="rounded-full border border-zinc-200 px-5 py-2.5 text-sm font-medium dark:border-zinc-800"
+            >
+              Skip, review now
+            </button>
+            <button
+              type="button"
+              onClick={() => setStep((s) => s + 1)}
+              className="rounded-full bg-foreground px-5 py-2.5 text-sm font-medium text-background hover:bg-[#383838] dark:hover:bg-[#ccc]"
+            >
+              Add more detail
+            </button>
+          </div>
+        </div>
+        <p className="mt-6 text-center text-xs text-zinc-400">{title}</p>
+      </div>
+    );
+  }
+
   if (!section) return null;
 
   return (
     <div className="mx-auto max-w-xl">
       <div className="mb-6 flex gap-1.5">
-        {visibleSections.map((s, i) => (
-          <div key={s.id} className={`h-1.5 flex-1 rounded-full ${i <= step ? "bg-foreground" : "bg-zinc-200 dark:bg-zinc-800"}`} />
+        {items.map((it, i) => (
+          <div
+            key={it.kind === "section" ? it.section.id : "interstitial"}
+            className={`h-1.5 flex-1 rounded-full ${i <= step ? "bg-foreground" : "bg-zinc-200 dark:bg-zinc-800"}`}
+          />
         ))}
       </div>
 
       <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-        Step {step + 1} of {visibleSections.length}
+        Step {step + 1} of {items.length}
+        {inAdvanced ? " · optional" : ""}
       </p>
       <h1 className="mt-1 text-2xl font-semibold tracking-tight">{section.title}</h1>
       {section.intro && <p className="mt-1.5 text-sm text-zinc-500">{section.intro}</p>}
@@ -213,7 +288,7 @@ export function DynamicForm({
 
       {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
-      <div className="mt-8 flex justify-between">
+      <div className="mt-8 flex items-center justify-between">
         <button
           type="button"
           onClick={() => setStep((s) => Math.max(0, s - 1))}
@@ -222,17 +297,24 @@ export function DynamicForm({
         >
           Back
         </button>
-        <button
-          type="button"
-          onClick={() => {
-            if (step === visibleSections.length - 1) setReviewing(true);
-            else setStep((s) => s + 1);
-          }}
-          disabled={requiredMissing}
-          className="rounded-full bg-foreground px-5 py-2.5 text-sm font-medium text-background hover:bg-[#383838] disabled:opacity-50 dark:hover:bg-[#ccc]"
-        >
-          {step === visibleSections.length - 1 ? "Review plan" : "Next"}
-        </button>
+        <div className="flex items-center gap-4">
+          {inAdvanced && (
+            <button type="button" onClick={() => setReviewing(true)} className="text-sm font-medium text-zinc-500 underline">
+              Skip remaining, review now
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              if (isLast) setReviewing(true);
+              else setStep((s) => s + 1);
+            }}
+            disabled={requiredMissing}
+            className="rounded-full bg-foreground px-5 py-2.5 text-sm font-medium text-background hover:bg-[#383838] disabled:opacity-50 dark:hover:bg-[#ccc]"
+          >
+            {isLast ? "Review plan" : "Next"}
+          </button>
+        </div>
       </div>
       <p className="mt-6 text-center text-xs text-zinc-400">{title}</p>
     </div>

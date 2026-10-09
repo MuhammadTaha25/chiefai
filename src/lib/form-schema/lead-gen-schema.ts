@@ -98,6 +98,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
     id: "target_companies",
     title: "Target Companies",
     intro: "Tell us what kind of companies you want us to find.",
+    optional: true,
     fields: [
       {
         id: "target_industries",
@@ -200,6 +201,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
     id: "growth",
     title: "Company Growth",
     intro: "These signals help us find companies that are actively growing and more likely to buy.",
+    optional: true,
     fields: [
       {
         id: "growth_rate",
@@ -250,7 +252,8 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
   {
     id: "funding",
     title: "Funding",
-    intro: "Optional, skip this if funding doesn't matter for your product.",
+    intro: "Skip this if funding doesn't matter for your product.",
+    optional: true,
     fields: [
       {
         id: "funding_status",
@@ -304,6 +307,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
   {
     id: "perfect_lead",
     title: "What Makes A Perfect Lead",
+    optional: true,
     fields: [
       {
         id: "good_customer_description",
@@ -333,6 +337,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
   {
     id: "similar_customers",
     title: "Similar Customers",
+    optional: true,
     fields: [
       {
         id: "has_existing_customers",
@@ -396,6 +401,7 @@ export const LEAD_GEN_SCHEMA: SectionConfig[] = [
   {
     id: "outreach",
     title: "Outreach",
+    optional: true,
     fields: [
       {
         id: "outreach_channels",
