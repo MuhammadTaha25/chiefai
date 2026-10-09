@@ -16,6 +16,18 @@ export interface FrontageQuery extends Pick<ProspectQuery, "industries" | "keywo
   countries: string[];
   /** City names; empty means the whole country. */
   cities: string[];
+  /** Free-text "places to exclude" from the form — country names/codes and/or city names mixed together. */
+  excludedLocations?: string[];
+}
+
+/** Splits a free-text exclusion list into resolved country codes and leftover city-name keywords. */
+export async function resolveExclusions(
+  call: FrontageCall,
+  excludedLocations: string[]
+): Promise<{ excludedCountryCodes: Set<string>; excludedCityKeywords: string[] }> {
+  if (!excludedLocations.length) return { excludedCountryCodes: new Set(), excludedCityKeywords: [] };
+  const { codes, unknown } = await resolveCountryCodes(call, excludedLocations);
+  return { excludedCountryCodes: new Set(codes), excludedCityKeywords: unknown.map((s) => s.trim().toLowerCase()).filter(Boolean) };
 }
 
 /** One validated search: every value is known to exist in the connector. */
@@ -135,7 +147,11 @@ async function canonicalCity(call: FrontageCall, country: string, city: string):
  * if the connector has that exact spelling (otherwise it becomes a free-text keyword, so a city the
  * user named is never silently dropped into "whole country").
  */
-export async function validateProposals(call: FrontageCall, proposals: ProposedSearch[]): Promise<{ plans: FrontagePlan[]; unknown: string[] }> {
+export async function validateProposals(
+  call: FrontageCall,
+  proposals: ProposedSearch[],
+  excludedCountryCodes: Set<string> = new Set()
+): Promise<{ plans: FrontagePlan[]; unknown: string[] }> {
   const plans: FrontagePlan[] = [];
   const unknown: string[] = [];
   for (const prop of proposals) {
@@ -145,6 +161,10 @@ export async function validateProposals(call: FrontageCall, proposals: ProposedS
       continue;
     }
     const country = codes[0];
+    // The client explicitly excluded this country — drop the whole proposal rather than searching it and
+    // relying on a post-filter to catch every row (the AI's proposal exists specifically to target this
+    // country, so there's nothing safe to salvage from it).
+    if (excludedCountryCodes.has(country)) continue;
 
     const validCategories: string[] = [];
     // A slug the connector does not list (the model guessed it) still names a kind of business the user
@@ -186,10 +206,16 @@ export async function validateProposals(call: FrontageCall, proposals: ProposedS
 }
 
 /** Deterministic plans straight from the form (no AI): used when the AI proposal is unavailable or unusable. */
-export async function plansFromForm(query: FrontageQuery, call: FrontageCall): Promise<FrontagePlan[]> {
+export async function plansFromForm(
+  query: FrontageQuery,
+  call: FrontageCall,
+  excludedCountryCodes: Set<string> = new Set()
+): Promise<FrontagePlan[]> {
   if (!query.countries.length) throw new Error("Choose at least one target country");
-  const { codes, unknown } = await resolveCountryCodes(call, query.countries);
-  if (!codes.length) throw new Error(`Unrecognised target country: ${unknown.join(", ")}`);
+  const { codes: allCodes, unknown } = await resolveCountryCodes(call, query.countries);
+  if (!allCodes.length) throw new Error(`Unrecognised target country: ${unknown.join(", ")}`);
+  const codes = allCodes.filter((c) => !excludedCountryCodes.has(c));
+  if (!codes.length) throw new Error("Every target country is also in the excluded-places list");
 
   const plans: FrontagePlan[] = [];
   const industries = query.industries.length ? query.industries : [null];
@@ -221,7 +247,13 @@ export interface RunPlansResult {
  * left off instead of re-fetching the same top results every time (which then all get deduped away against
  * already-saved leads, looking like the search "does nothing" on a repeat run).
  */
-export async function runPlans(plans: FrontagePlan[], limit: number, call: FrontageCall, baseOffset = 0): Promise<RunPlansResult> {
+export async function runPlans(
+  plans: FrontagePlan[],
+  limit: number,
+  call: FrontageCall,
+  baseOffset = 0,
+  excludedCityKeywords: string[] = []
+): Promise<RunPlansResult> {
   const seen = new Set<string>();
   const out: ProspectResult[] = [];
   let rowsScanned = 0;
@@ -249,6 +281,11 @@ export async function runPlans(plans: FrontagePlan[], limit: number, call: Front
           // Hills) or "...eXp of Greater Los Angeles, Inc." (actually Buena Park) are real rows the source
           // itself returns for a free-text "Los Angeles" search — never accept one on a name match alone.
           if (plan.city && r.city?.trim().toLowerCase() !== plan.city.trim().toLowerCase()) continue;
+          // "Places to exclude" is enforced against every row's own city field, not just trusted to the AI
+          // prompt that built this plan — a country-wide scan (no plan.city) would otherwise have no
+          // exclusion check at all for a specific excluded city within that country.
+          const rowCity = r.city?.trim().toLowerCase() ?? "";
+          if (rowCity && excludedCityKeywords.some((kw) => rowCity.includes(kw))) continue;
           const email = r.email?.trim().toLowerCase();
           if (!email || seen.has(email)) continue;
           seen.add(email);
@@ -277,6 +314,8 @@ export async function findProspectsViaFrontageLeads(
   proposals?: ProposedSearch[],
   baseOffset = 0
 ): Promise<RunPlansResult> {
+  const { excludedCountryCodes, excludedCityKeywords } = await resolveExclusions(call, query.excludedLocations ?? []);
+
   let plans: FrontagePlan[] = [];
   if (proposals?.length) {
     // The AI may only narrow, never widen: drop any proposed country the form did not name.
@@ -286,8 +325,8 @@ export async function findProspectsViaFrontageLeads(
       const { codes } = await resolveCountryCodes(call, [String(p.country ?? "")]);
       if (codes.length && allowed.has(codes[0])) inScope.push(p);
     }
-    plans = (await validateProposals(call, inScope)).plans;
+    plans = (await validateProposals(call, inScope, excludedCountryCodes)).plans;
   }
-  if (!plans.length) plans = await plansFromForm(query, call);
-  return runPlans(plans, query.limit, call, baseOffset);
+  if (!plans.length) plans = await plansFromForm(query, call, excludedCountryCodes);
+  return runPlans(plans, query.limit, call, baseOffset, excludedCityKeywords);
 }

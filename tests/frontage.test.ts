@@ -61,6 +61,36 @@ test("rejects when no country recognised (no silent broadening)", async () => {
   await assert.rejects(findProspectsViaFrontageLeads({ countries: [], cities: [], industries: [], keywords: [], limit: 3 }, fakeCall([])), /at least one/);
 });
 
+test("excluded_locations: an excluded country is never searched at all", async () => {
+  const log: Log = [];
+  await findProspectsViaFrontageLeads(
+    { countries: ["United States", "United Kingdom"], cities: [], industries: [], keywords: [], limit: 5, excludedLocations: ["United States"] },
+    fakeCall(log)
+  );
+  const countriesSearched = log.filter((l) => l.tool === "search_leads").map((l) => l.args.country);
+  assert.ok(countriesSearched.length > 0);
+  assert.ok(countriesSearched.every((c) => c === "GB"), "US must never be searched once excluded");
+});
+
+test("excluded_locations: a row whose city contains an excluded city name is dropped, even scanning a whole country", async () => {
+  const excludeCityCall = async (tool: string, args: Record<string, unknown>) => {
+    if (tool === "list_countries") return countries;
+    if (tool === "list_categories") return { categories: [] };
+    return {
+      leads: [
+        { name: "Mumbai Textiles", email: "a@mt.com", city: "Mumbai" },
+        { name: "Delhi Traders", email: "b@dt.com", city: "Delhi" },
+      ],
+    };
+  };
+  const { prospects } = await findProspectsViaFrontageLeads(
+    { countries: ["United Kingdom"], cities: [], industries: [], keywords: [], limit: 5, excludedLocations: ["Mumbai"] },
+    excludeCityCall
+  );
+  assert.equal(prospects.length, 1);
+  assert.equal(prospects[0].email, "b@dt.com");
+});
+
 function proposalCall(log: Log) {
   return async (tool: string, args: Record<string, unknown>) => {
     log.push({ tool, args });

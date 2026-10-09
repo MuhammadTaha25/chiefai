@@ -157,11 +157,16 @@ export async function POST(req: NextRequest) {
         industries: targetIndustries.length ? targetIndustries : analysis.industries,
         keywords: analysis.keywords,
         limit: leadCount,
+        // Previously only a soft instruction inside the Gemini prompt (never guaranteed) — now enforced
+        // server-side: a country in this list is never even searched, and a result whose own city field
+        // contains an excluded city name is dropped regardless of which filter matched it.
+        excludedLocations: toList(criteria.excluded_locations),
       };
       frontageSearchKey = JSON.stringify({
         countries: [...frontageQuery.countries].sort(),
         cities: [...frontageQuery.cities].sort(),
         industries: [...frontageQuery.industries].sort(),
+        excludedLocations: [...frontageQuery.excludedLocations].sort(),
       });
       const { data: cursorRow } = await admin
         .from("prospect_search_cursors")
