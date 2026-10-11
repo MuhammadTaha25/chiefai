@@ -8,9 +8,11 @@ import { cleanOutreachEmail, lintOutreachEmail } from "@/lib/email-quality";
 import { sendMail, mailgunDomainForAddress, getMailboxReadiness } from "@/lib/mailgun";
 import { withUnsubscribeFooter, unsubscribeHeaders } from "@/lib/compliance";
 import { resolveFirstFollowUpDelayMs } from "@/lib/follow-up-config";
+import { resolveDailySendCap } from "@/lib/send-cap";
+import { effectiveDailyLimit } from "@/lib/mailbox-readiness";
 import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
 
-const DAILY_INITIAL_SEND_LIMIT = 4;
+// Default daily cap lives in send-cap.ts (DEFAULT_DAILY_INITIAL_SEND_LIMIT = 4); a tenant can override it with clients.daily_send_cap.
 // The delay before the first follow-up check comes from follow-up-config.ts
 // (client-configurable via criteria.follow_up_delay_days, default 3 days) —
 // shared with follow-ups.ts so the two can never silently diverge.
@@ -53,7 +55,7 @@ interface Mailbox {
 
 /**
  * Sends today's batch of initial outreach emails for one client's active
- * monthly campaign — up to DAILY_INITIAL_SEND_LIMIT, one per eligible lead,
+ * monthly campaign — up to the tenant daily cap, one per eligible lead,
  * rotated across the client's own mailboxes only, with a randomized delay
  * between sends. Never touches another client's mailbox or leads (every
  * query below is scoped to `clientId`, resolved server-side).
@@ -82,7 +84,7 @@ export async function sendBatchForClient(clientId: string) {
 
   // Idempotent daily cap: counts sends already recorded today, so running
   // this route twice in one day (retry, overlapping cron) never sends more
-  // than DAILY_INITIAL_SEND_LIMIT total — the cap is enforced against actual
+  // than the daily cap total — the cap is enforced against actual
   // outreach_log rows, not an in-memory counter that resets per invocation.
   const { count: sentToday } = await admin
     .from("outreach_log")
@@ -91,7 +93,14 @@ export async function sendBatchForClient(clientId: string) {
     .eq("touch_number", 1)
     .gte("sent_at", startOfToday.toISOString());
 
-  const remaining = DAILY_INITIAL_SEND_LIMIT - (sentToday ?? 0);
+  // Optional per-tenant override (column may not exist yet / be null -> historical default of 4).
+  const [{ data: capRow }, { data: capMailboxes }] = await Promise.all([
+    admin.from("clients").select("daily_send_cap").eq("id", clientId).maybeSingle<{ daily_send_cap: number | null }>(),
+    admin.from("mailboxes").select("daily_send_limit, created_at").eq("client_id", clientId).returns<{ daily_send_limit: number | null; created_at: string }[]>(),
+  ]);
+  const mailboxCapacity = (capMailboxes ?? []).reduce((sum, m) => sum + effectiveDailyLimit(m), 0);
+  const dailyCap = resolveDailySendCap(capRow?.daily_send_cap, mailboxCapacity);
+  const remaining = dailyCap - (sentToday ?? 0);
   if (remaining <= 0) {
     return { clientId, campaignId: campaign.id, result: "skipped", detail: "daily limit already reached" };
   }
@@ -168,7 +177,11 @@ export async function sendBatchForClient(clientId: string) {
   // trusting that every upstream gate was correctly applied.
   const externalDomains = await getExternalDomainsForClient(admin, clientId);
 
+  const runStartedAt = Date.now();
   for (let i = 0; i < eligibleLeads.length; i++) {
+    // A larger cap means a longer run (15-60s between sends); stop before the serverless limit (maxDuration 300s).
+    // Unsent leads stay "new" and the daily cap is counted from outreach_log, so the next invocation continues.
+    if (Date.now() - runStartedAt > 230_000) break;
     const lead = eligibleLeads[i];
     // Mailbox choice + daily-limit enforcement live in reserveMailboxSlot (atomic); the random rotation
     // above is superseded by "first ready mailbox with capacity".
