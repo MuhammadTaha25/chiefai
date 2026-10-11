@@ -72,7 +72,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         error:
           reservation.reason === "at_capacity"
             ? "Daily sending capacity reached for all your mailboxes — try again tomorrow"
-            : "No verified mailbox available — finish mailbox/DNS setup under Domains first",
+            : reservation.reason === "all_unhealthy"
+              ? "Your mailboxes are paused because of a high bounce/complaint rate — add a new mailbox under Domains or review your lead list"
+              : "No verified mailbox available — finish mailbox/DNS setup under Domains first",
         code: reservation.reason,
       },
       { status: reservation.reason === "at_capacity" ? 429 : 400 }
