@@ -10,6 +10,8 @@ import { verifyMailgunSignature } from "@/lib/webhook-security";
 import { buildEmailHistory } from "@/lib/email-history";
 import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
 import { classifyMailboxMatch } from "@/lib/mailbox-match";
+import { ensureBookingLink, leadMeetingEventName } from "@/lib/booking-link";
+import { createLeadMeetingLink, getFreshCalendlyToken } from "@/lib/calendly";
 
 /**
  * Classifies an inbound reply with Gemini (real AI, 4-way: BOOKING / HAPPY /
@@ -293,7 +295,7 @@ export async function POST(req: NextRequest) {
 
     const { data: client } = await admin
       .from("clients")
-      .select("id, calendly_url, company_name")
+      .select("id, calendly_url, company_name, calendly_access_token, calendly_refresh_token, calendly_token_expires_at, calendly_user_uri")
       .eq("id", lead.client_id)
       .maybeSingle();
 
@@ -445,6 +447,23 @@ export async function POST(req: NextRequest) {
       logEvent("inbound.angry_repeat", { client_id: lead.client_id, lead_id: lead.id, result: "human_takeover" });
     } else if (mailbox && client && !autoReplyCapReached) {
       try {
+        // BOOKING leads get their own one-off Calendly event named after THIS tenant + the conversation topic and
+        // with a real meeting location. Any failure falls back to the tenant's normal link (never blocks the reply).
+        let linkForLead = calendlyUrl;
+        if (classification === "BOOKING" && calendlyUrl && client.calendly_user_uri) {
+          try {
+            const token = await getFreshCalendlyToken(admin, client);
+            if (token) {
+              const perLead = await createLeadMeetingLink(token, client.calendly_user_uri, {
+                name: leadMeetingEventName(client.company_name, meetingTopic),
+              });
+              if (perLead) linkForLead = perLead;
+            }
+          } catch {
+            // keep the generic link
+          }
+        }
+
         const draft = await draftReplyEmail({
           businessContext: formatBusinessContext(await getClientBusinessContext(admin, lead.client_id)),
           ourLastMessage: history || undefined,
@@ -452,8 +471,10 @@ export async function POST(req: NextRequest) {
           senderCompany: client.company_name ?? "us",
           leadName: lead.name || "there",
           theirReply: bodyPlain,
-          calendlyUrl,
+          calendlyUrl: linkForLead,
         });
+        // The model sometimes omits the link; replies to INTERESTED leads (BOOKING/HAPPY) must always carry it when one exists. Who gets a link is unchanged: UNCLEAR/ANGRY replies are left exactly as drafted.
+        if (classification === "BOOKING" || classification === "HAPPY") draft.body = ensureBookingLink(draft.body, linkForLead);
 
         // Keep the prospect's own subject line ("Re: <what they replied to>") so mail clients keep this in the same
         // thread; the model's invented subject would split the conversation.

@@ -179,7 +179,7 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
       });
       if (!reservation.ok) {
         await admin.from("leads").update({ next_follow_up_at: lead.next_follow_up_at }).eq("id", lead.id).is("next_follow_up_at", null);
-        results.push({ leadId: lead.id, result: "skipped", detail: reservation.reason === "at_capacity" ? "mailbox daily limit reached" : "no ready mailbox" });
+        results.push({ leadId: lead.id, result: "skipped", detail: reservation.reason === "at_capacity" ? "mailbox daily limit reached" : reservation.reason === "all_unhealthy" ? "all mailboxes paused: high bounce/complaint rate" : "no ready mailbox" });
         continue;
       }
       const mailbox = reservation.mailbox;
