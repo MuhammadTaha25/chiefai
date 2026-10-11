@@ -473,8 +473,8 @@ export async function POST(req: NextRequest) {
           theirReply: bodyPlain,
           calendlyUrl: linkForLead,
         });
-        // The model sometimes omits the link; BOOKING/HAPPY/UNCLEAR replies must always carry it when one exists.
-        if (classification !== "ANGRY") draft.body = ensureBookingLink(draft.body, linkForLead);
+        // The model sometimes omits the link; replies to INTERESTED leads (BOOKING/HAPPY) must always carry it when one exists. Who gets a link is unchanged: UNCLEAR/ANGRY replies are left exactly as drafted.
+        if (classification === "BOOKING" || classification === "HAPPY") draft.body = ensureBookingLink(draft.body, linkForLead);
 
         // Keep the prospect's own subject line ("Re: <what they replied to>") so mail clients keep this in the same
         // thread; the model's invented subject would split the conversation.
