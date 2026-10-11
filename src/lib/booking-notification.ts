@@ -146,11 +146,26 @@ export async function notifyCustomerOfBooking(
     .maybeSingle<{ company_name: string | null }>();
   if (!client) return { sent: false, reason: "client not found" };
 
-  const mailbox = await pickReadyMailbox(admin, clientId);
+  // Same mailbox that already emailed this lead (leadId makes pickReadyMailbox prefer it), so the confirmation
+  // comes from a sender the lead has seen — a brand-new sender is far more likely to land in spam.
+  const mailbox = await pickReadyMailbox(admin, clientId, leadId);
   if (!mailbox) return { sent: false, reason: "no verified mailbox to send from" };
   if (!(await assertMailboxDomainUsable(admin, clientId, mailbox.address))) {
     return { sent: false, reason: "domain ownership unverified or disconnected" };
   }
+
+  // Thread the confirmation onto the conversation we already have with this lead ("Re: <our last subject>" +
+  // In-Reply-To) instead of opening a cold-looking new thread.
+  const { data: lastSent } = await admin
+    .from("outreach_log")
+    .select("subject, provider_message_id")
+    .eq("client_id", clientId)
+    .eq("lead_id", leadId)
+    .not("provider_message_id", "is", null)
+    .not("provider_message_id", "like", "pending:%")
+    .order("sent_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ subject: string | null; provider_message_id: string }>();
 
   const { data: lead } = await admin
     .from("leads")
@@ -188,11 +203,13 @@ export async function notifyCustomerOfBooking(
   ].filter((l, i, a) => l !== "" || a[i - 1] !== "");
 
   try {
+    const prevSubject = lastSent?.subject?.trim();
     await sendMail({
+      inReplyTo: lastSent?.provider_message_id,
       domain: mailgunDomainForAddress(mailbox.address),
       from: mailbox.address,
       to: recipient,
-      subject: `Confirmed: ${topic} with ${businessName}`,
+      subject: prevSubject ? (/^\s*re:/i.test(prevSubject) ? prevSubject : `Re: ${prevSubject}`) : `Confirmed: ${topic} with ${businessName}`,
       text: lines.join("\n"),
     });
     return { sent: true };
