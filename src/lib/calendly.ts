@@ -115,6 +115,47 @@ export async function getFreshCalendlyToken(
   return t.access_token;
 }
 
+/** Location kinds Calendly accepts on a one-off event type that need no extra address field. */
+export type MeetingLocationKind = "google_conference" | "zoom_conference" | "microsoft_teams_conference" | "ask_invitee";
+
+/**
+ * Creates a one-off Calendly event type just for one lead (POST /one_off_event_types; scope event_types:write)
+ * so the invite carries OUR tenant's company + conversation topic as its name, and a real meeting location
+ * (Meet/Zoom link generated at booking time) instead of Calendly's generic "appointment" with no location.
+ * Returns the booking URL, or null on ANY failure (plan limits, missing scope, host without the Meet/Zoom
+ * integration...) so the caller falls back to the client's normal calendly_url — never blocks the reply.
+ */
+export async function createLeadMeetingLink(
+  accessToken: string,
+  hostUserUri: string,
+  opts: { name: string; durationMinutes?: number; locationKind?: MeetingLocationKind; daysAhead?: number }
+): Promise<string | null> {
+  const attempt = async (withLocation: boolean): Promise<string | null> => {
+    const res = await fetch("https://api.calendly.com/one_off_event_types", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: opts.name,
+        host: hostUserUri,
+        duration: opts.durationMinutes ?? 30,
+        date_setting: { type: "days_in_future", days: opts.daysAhead ?? 14, only_weekdays: true },
+        ...(withLocation ? { location: { kind: opts.locationKind ?? "google_conference" } } : {}),
+      }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { resource?: { scheduling_url?: string } };
+    const url = data.resource?.scheduling_url;
+    return url && /^https:\/\//.test(url) ? url : null;
+  };
+  try {
+    // Prefer an event with a real meeting location; if Calendly rejects it (e.g. no Google Meet/Zoom connected on
+    // the host), still give the lead a named, per-lead link rather than the generic one.
+    return (await attempt(true)) ?? (await attempt(false));
+  } catch {
+    return null;
+  }
+}
+
 export interface CalendlyInvitee {
   inviteeUri: string;
   email: string;

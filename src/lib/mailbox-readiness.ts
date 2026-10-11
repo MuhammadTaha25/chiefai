@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { getUnhealthyMailboxIds } from "@/lib/mailbox-health";
 import { getMailboxReadiness } from "@/lib/mailgun";
 
 /**
@@ -34,10 +35,16 @@ export async function pickReadyMailbox(
     preferredId = last?.mailbox_id;
   }
   const ordered = [...mailboxes].sort((a, b) => Number(b.id === preferredId) - Number(a.id === preferredId));
+  // Prefer healthy mailboxes; an unhealthy one (high bounce/complaint rate) is only used if nothing else is ready,
+  // because a reply to someone who already wrote to us is not cold outreach.
+  const unhealthy = await getUnhealthyMailboxIds(admin, clientId);
+  let fallback: { id: string; address: string } | null = null;
   for (const m of ordered) {
-    if ((await getMailboxReadiness(m.address)) === "ready") return m;
+    if ((await getMailboxReadiness(m.address)) !== "ready") continue;
+    if (!unhealthy.has(m.id)) return m;
+    fallback ??= m;
   }
-  return null;
+  return fallback;
 }
 
 /** Start of the current day: the same boundary the Domains page uses for "sent today". */
@@ -59,7 +66,7 @@ export function effectiveDailyLimit(m: { daily_send_limit: number | null; create
 
 export type MailboxReservation =
   | { ok: true; mailbox: { id: string; address: string }; reservationId: string }
-  | { ok: false; reason: "no_mailbox" | "at_capacity" };
+  | { ok: false; reason: "no_mailbox" | "at_capacity" | "all_unhealthy" };
 
 /**
  * Sales sends today for one mailbox. touch_number 0 (auto-replies to prospects) is excluded: replies are
@@ -116,9 +123,17 @@ export async function reserveMailboxSlot(
   // Rotation: keep the mailbox that already emailed this lead (thread continuity); otherwise spread sends by
   // taking the READY mailbox with the fewest sales sends today (random tie-break). A mailbox that hits its
   // daily limit is skipped below, so sending switches to the next one automatically.
+  // Health failover: a mailbox with a high recent bounce/complaint rate is skipped for NEW sales sends so mail
+  // shifts to the tenant's other healthy mailboxes (see mailbox-health.ts).
+  const unhealthy = await getUnhealthyMailboxIds(admin, clientId);
+  let skippedUnhealthy = false;
   const readyMailboxes: { m: (typeof mailboxes)[number]; used: number }[] = [];
   for (const m of mailboxes) {
     if ((await getMailboxReadiness(m.address)) !== "ready") continue;
+    if (unhealthy.has(m.id)) {
+      skippedUnhealthy = true;
+      continue;
+    }
     readyMailboxes.push({ m, used: await salesSendsToday(admin, m.id) });
   }
   const ordered = readyMailboxes
@@ -158,6 +173,7 @@ export async function reserveMailboxSlot(
     return { ok: true, mailbox: { id: m.id, address: m.address }, reservationId: reserved.id };
     }
   }
+  if (!sawReady && skippedUnhealthy) return { ok: false, reason: "all_unhealthy" };
   return { ok: false, reason: sawReady ? "at_capacity" : "no_mailbox" };
 }
 

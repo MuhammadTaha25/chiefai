@@ -174,7 +174,7 @@ export async function sendBatchForClient(clientId: string) {
     // above is superseded by "first ready mailbox with capacity".
     const reservation = await reserveMailboxSlot(admin, clientId, lead.id, { touch_number: 1, campaign_id: campaign.id });
     if (!reservation.ok) {
-      sent.push({ leadId: lead.id, mailbox: "-", result: "failed", error: reservation.reason === "at_capacity" ? "mailbox daily limit reached" : "no ready mailbox" });
+      sent.push({ leadId: lead.id, mailbox: "-", result: "failed", error: reservation.reason === "at_capacity" ? "mailbox daily limit reached" : reservation.reason === "all_unhealthy" ? "all mailboxes paused: high bounce/complaint rate" : "no ready mailbox" });
       break;
     }
     const mailbox = reservation.mailbox;
