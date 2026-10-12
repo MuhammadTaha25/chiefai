@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentClient } from "@/lib/get-current-client";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getCallSettings, setCallSettings, normalisePhone, normaliseTime, localHourIn } from "@/lib/voice/call-settings";
+import { getCallSettings, setCallSettings, normalisePhone, normaliseTime, localHourIn, localDateAt } from "@/lib/voice/call-settings";
 import { logEvent } from "@/lib/log-event";
 import { getPinHash, hashPin, normalisePin, setPinHash } from "@/lib/voice/pin";
 
@@ -99,9 +99,12 @@ export async function POST(req: NextRequest) {
     const changed =
       (patch.daily_call_time !== undefined && patch.daily_call_time !== current.daily_call_time) ||
       (typeof patch.personal_phone_number === "string" && patch.personal_phone_number !== current.personal_phone_number);
-    const { hour, minute } = localHourIn(tz);
+    const { date: today, hour, minute } = localHourIn(tz);
     const target = Number(newTime.slice(0, 2)) * 60 + Number(newTime.slice(3, 5));
-    if (changed && hour >= 0 && target >= hour * 60 + minute - 15) patch.daily_call_last_slot = null;
+    // Reopen today's slot only if no call has gone out today yet (in the owner's timezone).
+    // Otherwise a time change after the day's call would make the cron ring a second time.
+    const calledToday = !!current.daily_call_last_at && localDateAt(tz, current.daily_call_last_at) === today;
+    if (changed && !calledToday && hour >= 0 && target >= hour * 60 + minute - 15) patch.daily_call_last_slot = null;
   }
 
   // PIN: a string of 4-6 digits sets it, null removes it, "" / absent leaves it alone.

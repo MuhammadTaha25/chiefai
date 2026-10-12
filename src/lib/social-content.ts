@@ -155,6 +155,8 @@ export interface PublishInput {
   /** Per platform: may this go live (true) or must it stay a draft (false)? */
   mayPublish: (platform: string) => boolean;
   media: { base64: string; mimeType: string; kind: "image" | "video" };
+  /** Carousel: the remaining slides after `media` (slide 1). Empty for single posts and stories. */
+  extraSlides?: { base64: string; mimeType: string }[];
   caption: string;
   story: boolean;
   filenameBase: string;
@@ -176,6 +178,7 @@ export interface PublishResult {
 export async function publishToConnections(input: PublishInput): Promise<PublishResult> {
   const ext = input.media.mimeType.split("/")[1]?.split(";")[0] || (input.media.kind === "video" ? "mp4" : "png");
   const urlByGroup = new Map<ZernioKeyGroup, string>();
+  const slideUrlsByGroup = new Map<ZernioKeyGroup, string[]>();
   const buckets = new Map<string, { group: ZernioKeyGroup; publish: boolean; targets: ZernioPostTarget[] }>();
   let anyPublish = false;
 
@@ -193,16 +196,33 @@ export async function publishToConnections(input: PublishInput): Promise<Publish
       if (!url) throw new Error(`Zernio media upload returned no URL for ${group}`);
       urlByGroup.set(group, url);
     }
+    // Carousel: upload the remaining slides once per group, in order after slide 1.
+    if (input.extraSlides?.length && !slideUrlsByGroup.has(group)) {
+      const urls: string[] = [];
+      for (const [i, slide] of input.extraSlides.entries()) {
+        const sExt = slide.mimeType.split("/")[1]?.split(";")[0] || "png";
+        const up = await uploadZernioMediaDirect(group, {
+          bytes: Buffer.from(slide.base64, "base64"),
+          filename: `${input.filenameBase}-slide${i + 2}.${sExt}`,
+          contentType: slide.mimeType,
+        });
+        const slideUrl = up.url ?? up.mediaUrl;
+        if (!slideUrl) throw new Error(`Zernio slide upload returned no URL for ${group}`);
+        urls.push(slideUrl);
+      }
+      slideUrlsByGroup.set(group, urls);
+    }
     const publish = input.mayPublish(conn.platform);
     if (publish) anyPublish = true;
 
     const item: ZernioMediaItem = { type: input.media.kind, url, mimeType: input.media.mimeType };
+    const slideItems: ZernioMediaItem[] = (slideUrlsByGroup.get(group) ?? []).map((u) => ({ type: "image", url: u, mimeType: "image/png" }));
     const key = `${group}|${publish}`;
     const bucket = buckets.get(key) ?? { group, publish, targets: [] };
     bucket.targets.push({
       platform: conn.platform as ZernioPostTarget["platform"],
       accountId: conn.zernio_account_id,
-      customMedia: [item],
+      customMedia: [item, ...slideItems],
       // contentType exists only in Instagram's and Facebook's platform data.
       ...(input.story && (conn.platform === "instagram" || conn.platform === "facebook")
         ? { platformSpecificData: { contentType: "story" } }

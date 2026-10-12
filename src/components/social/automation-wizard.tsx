@@ -2,11 +2,52 @@
 
 import { useState } from "react";
 import { SocialPlatform, SocialAutomationSettings, PLATFORM_META } from "@/types/social";
-import { weeklyItems } from "@/lib/social-schedule";
+import {
+  DAILY_WEEKLY_PLAN,
+  RECOMMENDED_PLAN,
+  RECOMMENDED_WEEKLY_PLAN,
+  countsFromPlan,
+  parseWeeklyPlan,
+  planItems,
+  type DayPlan,
+  type PostFormat,
+  type WeeklyPlan,
+} from "@/lib/social-schedule";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-const FREQ_OPTIONS = [1, 2, 3, 5, 7, 10];
+const FORMAT_LABEL: Record<PostFormat, string> = {
+  none: "Rest",
+  image: "Image",
+  carousel: "Carousel",
+  video: "Video",
+};
+
+type PlanChoice = "recommended" | "daily" | "custom";
+
+/** Minutes east of UTC for a timezone at a given moment (DST-aware). */
+function offsetMinutes(tz: string, at: Date): number {
+  const p = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).formatToParts(at);
+  const g = (t: string) => Number(p.find((x) => x.type === t)?.value ?? 0);
+  const asUtc = Date.UTC(g("year"), g("month") - 1, g("day"), g("hour"), g("minute"), g("second"));
+  return Math.round((asUtc - at.getTime()) / 60000);
+}
+
+/** "12:00" in `from` → "HH:MM" in `to`, for today. */
+function convertTime(hhmm: string, from: string, to: string): string {
+  const [h, m] = hhmm.split(":").map(Number);
+  const now = new Date();
+  const local = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), h, m) - offsetMinutes(from, now) * 60000;
+  const t = new Date(local + offsetMinutes(to, now) * 60000);
+  return `${String(t.getUTCHours()).padStart(2, "0")}:${String(t.getUTCMinutes()).padStart(2, "0")}`;
+}
+
+function timezoneOptions(): string[] {
+  const intl = Intl as unknown as { supportedValuesOf?: (k: string) => string[] };
+  return intl.supportedValuesOf ? intl.supportedValuesOf("timeZone") : ["Asia/Karachi", "America/New_York", "Europe/London", "Asia/Dubai", "UTC"];
+}
 
 function Toggle({
   label,
@@ -44,6 +85,12 @@ function Toggle({
   );
 }
 
+function initialPlan(existing: SocialAutomationSettings | null): WeeklyPlan {
+  const saved = parseWeeklyPlan(existing?.weekly_plan);
+  if (saved) return saved;
+  return RECOMMENDED_WEEKLY_PLAN.map((d) => ({ ...d }));
+}
+
 export default function AutomationWizard({
   platform,
   existing,
@@ -56,11 +103,7 @@ export default function AutomationWizard({
   onActivated: () => void;
 }) {
   const meta = PLATFORM_META[platform];
-  const [postsPerWeek, setPostsPerWeek] = useState(existing?.posts_per_week ?? 3);
-  const [imagePosts, setImagePosts] = useState(existing?.image_posts_per_week ?? 2);
-  const [carouselPosts, setCarouselPosts] = useState(existing?.carousel_posts_per_week ?? 1);
-  const [videoPosts, setVideoPosts] = useState(existing?.video_posts_per_week ?? 0);
-  const [storiesPerWeek, setStoriesPerWeek] = useState(existing?.stories_per_week ?? 3);
+  const [plan, setPlan] = useState<WeeklyPlan>(() => initialPlan(existing));
   const [contentPreference, setContentPreference] = useState(existing?.content_preference ?? "ai_full");
   const [approvalMode, setApprovalMode] = useState(existing?.approval_mode ?? "draft_only");
   const [publishMode, setPublishMode] = useState(existing?.publish_mode ?? "approval_required");
@@ -74,11 +117,40 @@ export default function AutomationWizard({
   const [leadDetection, setLeadDetection] = useState(existing?.lead_detection_enabled ?? true);
   const [analyticsEnabled, setAnalyticsEnabled] = useState(existing?.analytics_enabled ?? true);
 
-  const [postTime, setPostTime] = useState(existing?.post_time ?? "");
+  const [postTime, setPostTime] = useState(existing?.post_time ?? RECOMMENDED_PLAN.postTime);
+  const [storyTime, setStoryTime] = useState(existing?.story_time ?? RECOMMENDED_PLAN.storyTime);
+  const [timezone, setTimezone] = useState(existing?.timezone ?? "");
+  const [planChoice, setPlanChoice] = useState<PlanChoice>(existing ? "custom" : "recommended");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const tzReady = Boolean(timezone);
+  const counts = countsFromPlan(plan);
+
+  function applyPlan(choice: PlanChoice) {
+    setPlanChoice(choice);
+    if (choice === "recommended") {
+      setPlan(RECOMMENDED_WEEKLY_PLAN.map((d) => ({ ...d })));
+      setPostTime(RECOMMENDED_PLAN.postTime);
+      setStoryTime(RECOMMENDED_PLAN.storyTime);
+    } else if (choice === "daily") {
+      setPlan(DAILY_WEEKLY_PLAN.map((d) => ({ ...d })));
+      setPostTime(RECOMMENDED_PLAN.postTime);
+      setStoryTime(RECOMMENDED_PLAN.storyTime);
+    }
+  }
+
+  /** Any change to a single day turns the plan into a custom one. */
+  function setDay(i: number, change: Partial<DayPlan>) {
+    setPlanChoice("custom");
+    setPlan((p) => p.map((d, idx) => (idx === i ? { ...d, ...change } : d)));
+  }
+
   async function activate() {
+    if (!tzReady) {
+      setError("Choose your timezone first.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -88,11 +160,8 @@ export default function AutomationWizard({
         body: JSON.stringify({
           platform,
           activate: true,
-          posts_per_week: postsPerWeek,
-          image_posts_per_week: imagePosts,
-          carousel_posts_per_week: carouselPosts,
-          video_posts_per_week: videoPosts,
-          stories_per_week: storiesPerWeek,
+          // The per-day plan is the source of truth; the server derives the count columns from it.
+          weekly_plan: storiesEnabled ? plan : plan.map((d) => ({ ...d, story: false })),
           content_preference: contentPreference,
           approval_mode: approvalMode,
           publish_mode: publishMode,
@@ -104,9 +173,9 @@ export default function AutomationWizard({
           comment_enabled: commentEnabled,
           lead_detection_enabled: leadDetection,
           analytics_enabled: analyticsEnabled,
-          // Optional: empty means "use the default time". The timezone is the browser's, saved only with a time.
           post_time: postTime || null,
-          timezone: postTime ? Intl.DateTimeFormat().resolvedOptions().timeZone : null,
+          story_time: storyTime || null,
+          timezone: timezone || null,
         }),
       });
       const data = await res.json();
@@ -118,6 +187,8 @@ export default function AutomationWizard({
       setLoading(false);
     }
   }
+
+  const previewItems = planItems(plan, postTime, storyTime);
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 py-8" onClick={onClose}>
@@ -135,101 +206,129 @@ export default function AutomationWizard({
           <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 type-caption text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
             What runs today: automatic replies to comments and direct messages, and AI-written posts, videos and stories created from your Business Profile on the weekly plan you choose below. They go live only if approval is set to full automation and automatic publishing is on; otherwise they are saved as drafts for you to release. You can also create posts manually from the Content page.
           </p>
+
           <section>
             <h4 className="type-caption font-semibold text-ink">How often should we post?</h4>
-            <p className="mt-0.5 type-caption text-ink-tertiary">Recommended: 3–5 posts/week</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {FREQ_OPTIONS.map((n) => (
+            <div className="mt-2 space-y-2">
+              {[
+                { v: "recommended" as const, title: "Recommended: 3 posts/week (Tue, Wed, Thu)", note: "Research ke mutabiq sab se achhe din aur time. Lunch par posts, shaam ko stories. Reach aur engagement behtar hone ki umeed hai." },
+                { v: "daily" as const, title: "Daily: 7 posts/week", note: "Account roz active dikhta hai, aur zyada mauqe milte hain. Har din naya content banega, reposting nahi." },
+                { v: "custom" as const, title: "Custom", note: "Har din ke liye khud chunein: rest, image, carousel ya video, aur story." },
+              ].map((opt) => (
                 <button
-                  key={n}
-                  onClick={() => {
-                    // The weekly plan is built from the per-format counts below, so keep them adding up to this number.
-                    setPostsPerWeek(n);
-                    setImagePosts(Math.max(0, n - carouselPosts - videoPosts));
-                  }}
-                  className={`rounded-full px-3 py-1.5 type-caption font-semibold ${
-                    postsPerWeek === n ? "bg-primary text-primary-foreground" : "tile text-ink-secondary"
+                  key={opt.v}
+                  type="button"
+                  onClick={() => applyPlan(opt.v)}
+                  className={`block w-full rounded-md border px-3 py-2 text-left ${
+                    planChoice === opt.v ? "border-primary bg-primary/5" : "border-strong"
                   }`}
                 >
-                  {n}/week
+                  <span className="block type-caption font-semibold text-ink">{opt.title}</span>
+                  <span className="mt-0.5 block type-caption text-ink-tertiary">{opt.note}</span>
                 </button>
               ))}
             </div>
           </section>
 
           <section>
-            <h4 className="type-caption font-semibold text-ink">What should we create?</h4>
-            <div className="mt-2 space-y-2">
-              {[
-                { label: "Image posts", value: imagePosts, set: setImagePosts },
-                { label: "Carousel posts", value: carouselPosts, set: setCarouselPosts },
-                { label: "Videos/Reels", value: videoPosts, set: setVideoPosts },
-              ].map((row) => (
-                <div key={row.label} className="flex items-center justify-between tile px-3 py-2">
-                  <span className="type-caption text-ink-secondary">{row.label}</span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => row.set(Math.max(0, row.value - 1))}
-                      className="grid size-6 place-items-center rounded-sm border border-strong text-ink-secondary"
-                    >
-                      −
-                    </button>
-                    <span className="num w-4 text-center text-ink">{row.value}</span>
-                    <button
-                      onClick={() => row.set(row.value + 1)}
-                      className="grid size-6 place-items-center rounded-sm border border-strong text-ink-secondary"
-                    >
-                      +
-                    </button>
-                  </div>
+            <h4 className="type-caption font-semibold text-ink">Your week</h4>
+            <p className="mt-0.5 type-caption text-ink-tertiary">
+              Har din ke aage format chunein. Rest ka matlab us din kuch nahi jayega.
+            </p>
+            <div className="mt-2 space-y-1.5">
+              {DAYS.map((d, i) => (
+                <div key={d} className="flex items-center justify-between gap-2 tile px-3 py-2">
+                  <span className="w-10 type-caption font-semibold text-ink">{d}</span>
+                  <select
+                    value={plan[i].post}
+                    onChange={(e) => setDay(i, { post: e.target.value as PostFormat })}
+                    className="flex-1 rounded-md border border-strong bg-raised px-2 py-1 type-caption text-ink"
+                  >
+                    {(Object.keys(FORMAT_LABEL) as PostFormat[]).map((f) => (
+                      <option key={f} value={f}>
+                        {FORMAT_LABEL[f]}
+                      </option>
+                    ))}
+                  </select>
+                  <label className={`flex items-center gap-1 type-caption ${storiesEnabled ? "text-ink-secondary" : "text-ink-tertiary opacity-50"}`}>
+                    <input
+                      type="checkbox"
+                      disabled={!storiesEnabled}
+                      checked={plan[i].story}
+                      onChange={(e) => setDay(i, { story: e.target.checked })}
+                    />
+                    Story
+                  </label>
                 </div>
               ))}
             </div>
             <p className="mt-2 type-caption text-ink-tertiary">
-              Total: {imagePosts + carouselPosts + videoPosts} feed posts/week
+              Total: {counts.posts} feed posts ({counts.images} image, {counts.carousels} carousel, {counts.videos} video) aur {storiesEnabled ? counts.stories : 0} stories/week
             </p>
           </section>
 
           <section>
-            <h4 className="type-caption font-semibold text-ink">Stories</h4>
-            <p className="mt-0.5 type-caption text-ink-tertiary">How many stories should we publish each week?</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {[3, 5, 7, 10, 14].map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setStoriesPerWeek(n)}
-                  className={`rounded-full px-3 py-1.5 type-caption font-semibold ${
-                    storiesPerWeek === n ? "bg-primary text-primary-foreground" : "tile text-ink-secondary"
-                  }`}
-                >
-                  {n}
-                </button>
-              ))}
+            <h4 className="type-caption font-semibold text-ink">When should we post?</h4>
+            <div className="mt-2 grid grid-cols-2 gap-3">
+              <label className="type-caption text-ink-secondary">
+                Post time
+                <input
+                  type="time"
+                  value={postTime}
+                  onChange={(e) => {
+                    setPlanChoice("custom");
+                    setPostTime(e.target.value);
+                  }}
+                  className="mt-1 w-full rounded-md border border-strong bg-raised px-3 py-2 type-body text-ink"
+                />
+              </label>
+              <label className="type-caption text-ink-secondary">
+                Story time
+                <input
+                  type="time"
+                  value={storyTime}
+                  onChange={(e) => {
+                    setPlanChoice("custom");
+                    setStoryTime(e.target.value);
+                  }}
+                  className="mt-1 w-full rounded-md border border-strong bg-raised px-3 py-2 type-body text-ink"
+                />
+              </label>
             </div>
-          </section>
-
-          <section>
-            <h4 className="type-caption font-semibold text-ink">When should we post? (optional)</h4>
-            <p className="mt-0.5 type-caption text-ink-tertiary">Leave empty and posts go out at 17:00 and stories at 19:00.</p>
-            <input
-              type="time"
-              value={postTime}
-              onChange={(e) => setPostTime(e.target.value)}
-              className="mt-2 rounded-md border border-strong bg-raised px-3 py-2 type-body text-ink"
-            />
+            <label className="mt-3 block type-caption text-ink-secondary">
+              Your timezone (required)
+              <select
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+                className="mt-1 w-full rounded-md border border-strong bg-raised px-3 py-2 type-body text-ink"
+              >
+                <option value="">Choose a timezone…</option>
+                {timezoneOptions().map((tz) => (
+                  <option key={tz} value={tz}>
+                    {tz}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {tzReady ? (
+              <p className="mt-2 type-caption text-ink-tertiary">
+                Posts {postTime} ({timezone}) par jayengi
+                {timezone !== "Asia/Karachi" && <> — Pakistan mein {convertTime(postTime, timezone, "Asia/Karachi")}</>}. Stories {storyTime} par.
+              </p>
+            ) : (
+              <p className="mt-2 type-caption text-amber-700 dark:text-amber-300">Timezone chunne ke baad hi activate ho sakta hai.</p>
+            )}
             <div className="mt-3 grid grid-cols-7 gap-1">
               {DAYS.map((d, i) => {
-                const items = weeklyItems({ images: imagePosts, carousels: carouselPosts, videos: videoPosts, stories: storiesEnabled ? storiesPerWeek : 0, postsPerWeek, postTime }).filter((it) => it.weekday === i);
-                const posts = items.filter((it) => it.kind === "post");
-                const stories = items.filter((it) => it.kind === "story").length;
+                const items = previewItems.filter((it) => it.weekday === i);
+                const post = items.find((it) => it.kind === "post");
+                const hasStory = items.some((it) => it.kind === "story");
                 return (
                   <div key={d} className="tile p-1.5 text-center type-caption">
                     <p className="font-semibold text-ink">{d}</p>
-                    {posts.length === 0 && stories === 0 && <p className="text-ink-tertiary">rest</p>}
-                    {posts.map((it, k) => (
-                      <p key={k} className="text-ink-secondary">{it.format === "video" ? "video" : "post"}</p>
-                    ))}
-                    {stories > 0 && <p className="text-ink-tertiary">{stories} story</p>}
+                    {!post && !hasStory && <p className="text-ink-tertiary">rest</p>}
+                    {post && <p className="text-ink-secondary">{FORMAT_LABEL[post.format === "story" ? "none" : post.format === "carousel" ? "carousel" : post.format === "video" ? "video" : "image"]}</p>}
+                    {hasStory && <p className="text-ink-tertiary">story</p>}
                   </div>
                 );
               })}
@@ -335,8 +434,8 @@ export default function AutomationWizard({
             <p className="type-caption font-semibold text-ink">You&apos;re ready to automate your social media.</p>
             <ul className="mt-2 space-y-1 type-caption text-ink-secondary">
               <li>{meta.label} ✓</li>
-              <li>{postsPerWeek} posts/week ✓</li>
-              {storiesEnabled && <li>{storiesPerWeek} stories/week ✓</li>}
+              <li>{counts.posts} posts/week ✓</li>
+              {storiesEnabled && <li>{counts.stories} stories/week ✓</li>}
               {autoCreate && <li>AI content creation ✓</li>}
               {autoPublish && <li>Automatic publishing ✓</li>}
               {dmEnabled && <li>DM assistant ✓</li>}
@@ -355,7 +454,7 @@ export default function AutomationWizard({
             </button>
             <button
               onClick={activate}
-              disabled={loading}
+              disabled={loading || !tzReady}
               className="flex-1 rounded-md bg-primary px-4 py-2 type-caption font-semibold text-primary-foreground hover:bg-primary-hover disabled:opacity-50"
             >
               {loading ? "Activating…" : "Activate Automation"}
