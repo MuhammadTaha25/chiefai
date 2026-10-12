@@ -37,7 +37,7 @@ export interface CallSettings {
 export const DEFAULTS: Omit<CallSettings, "personal_phone_number" | "daily_call_last_at" | "daily_call_last_slot"> = {
   daily_call_enabled: false,
   daily_call_time: "18:00",
-  daily_call_timezone: "Asia/Karachi",
+  daily_call_timezone: "",
 };
 
 /** Loose E.164: a leading + and 8–15 digits. */

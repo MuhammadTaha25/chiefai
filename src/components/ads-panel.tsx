@@ -191,16 +191,30 @@ function PublishButtons({
  * budget, and Meta's OWN placement renderings — all from a draft that has not
  * spent anything. Publish turns it on; Discard deletes it on Meta.
  */
+/** Uploads the user's own image/video from their PC and returns the public media. */
+async function uploadOwnCreative(file: File) {
+  const body = new FormData();
+  body.append("file", file);
+  const res = await fetch("/api/ads/upload-media", { method: "POST", body });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Upload failed");
+  return data as { url: string; mediaType: "image" | "video"; filename: string };
+}
+
 function PreviewPanel({
   result,
   onDone,
   onRegenerate,
   regenerating,
+  onUploadOwn,
+  uploading,
 }: {
   result: LaunchResult;
   onDone: () => void;
   onRegenerate?: () => void;
   regenerating?: boolean;
+  onUploadOwn?: (file: File) => void;
+  uploading?: boolean;
 }) {
   const c = result.creative;
 
@@ -426,6 +440,70 @@ function PreviewPanel({
           </p>
         </div>
       )}
+      {onUploadOwn && (
+        <div>
+          <label className="block w-full cursor-pointer rounded-md border border-zinc-200 px-3 py-2 text-center text-sm font-medium dark:border-zinc-800">
+            {uploading ? "Uploading…" : "Upload your own image or video"}
+            <input
+              type="file"
+              accept="image/*,video/*"
+              className="hidden"
+              disabled={uploading}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) onUploadOwn(f);
+              }}
+            />
+          </label>
+          <p className="mt-1 text-[10px] text-zinc-500">
+            Creates a NEW paused draft that uses your own file instead of a generated one.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Removes a failed or declined attempt from ChiefAI. The server refuses anything that reached Meta. */
+function DeleteFailedButton({ campaignId, onDone }: { campaignId: string; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [armed, setArmed] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function remove() {
+    // Two clicks instead of window.confirm: native dialogs are blocked in some browser panes and silently cancel the delete.
+    if (!armed) {
+      setArmed(true);
+      setErr(null);
+      return;
+    }
+    setArmed(false);
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/ads/campaigns/${campaignId}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Delete failed");
+      onDone();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        onClick={remove}
+        disabled={busy}
+        className="w-full rounded-md border border-red-200 py-1 text-[11px] font-medium text-red-600 disabled:opacity-50 dark:border-red-900"
+      >
+        {busy ? "Deleting…" : armed ? "Click again to delete" : "Delete this attempt"}
+      </button>
+      {err && <p className="mt-1 text-red-600">{err}</p>}
     </div>
   );
 }
@@ -456,9 +534,12 @@ function EditCampaignForm({
   const [error, setError] = useState<string | null>(null);
   const [issues, setIssues] = useState<AdIssue[]>([]);
   const [result, setResult] = useState<LaunchResult | null>(null);
+  const [lastValues, setLastValues] = useState<FormValues | null>(null);
+  const [uploading, setUploading] = useState(false);
   const rawBrief = (campaign.launch_payload?.raw_brief as FormValues | undefined) ?? {};
 
-  async function handleSubmit(values: FormValues) {
+  async function handleSubmit(values: FormValues, extra: Record<string, unknown> = {}) {
+    setLastValues(values);
     setError(null);
     setIssues([]);
     const local = validateAdBrief({ ...values, daily_budget: Number(values.daily_budget) || 0 } as never);
@@ -470,7 +551,7 @@ function EditCampaignForm({
     const res = await fetch(`/api/ads/${platform}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...values, daily_budget: Number(values.daily_budget) || 0, regenerate_of: campaign.id }),
+      body: JSON.stringify({ ...values, daily_budget: Number(values.daily_budget) || 0, regenerate_of: campaign.id, ...extra }),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -481,10 +562,31 @@ function EditCampaignForm({
     setResult(data as LaunchResult);
   }
 
+  async function uploadOwn(file: File) {
+    if (!lastValues || !result?.campaignId) return;
+    setUploading(true);
+    try {
+      let media;
+      try {
+        media = await uploadOwnCreative(file);
+      } catch (err) {
+        setError((err as Error).message);
+        return;
+      }
+      await handleSubmit({ ...lastValues, has_creative_assets: "yes", creative_media: media } as FormValues, {
+        regenerate_of: result.campaignId,
+      });
+    } catch {
+      // handleSubmit already recorded the error.
+    } finally {
+      setUploading(false);
+    }
+  }
+
   if (result) {
     return (
       <div className="mt-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
-        <PreviewPanel result={result} onDone={onDone} />
+        <PreviewPanel result={result} onDone={onDone} onUploadOwn={uploadOwn} uploading={uploading} />
         <button
           type="button"
           onClick={onDone}
@@ -519,8 +621,9 @@ function EditCampaignForm({
         onSubmit={handleSubmit}
         submitLabel="Save as new draft"
         formId={`ads-edit-${campaign.id}`}
+        ignoreDraft
+        initialStepId="creative"
         initialValues={rawBrief}
-        initialReviewing
         reviewTitle="Here's the updated ad"
         reviewNote={`Review your changes below. On submit we rebuild the campaign, ad set and ad on ${platformLabel} as a NEW paused draft — nothing is spent until you publish it.`}
       />
@@ -552,6 +655,7 @@ function BriefForm({
   const [lastValues, setLastValues] = useState<FormValues | null>(null);
   const [approval, setApproval] = useState<{ what: string; original: string; adjusted: string; reason: string }[] | null>(null);
   const [regenerating, setRegenerating] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   async function handleSubmit(values: FormValues, extra: Record<string, unknown> = {}) {
     setLastValues(values);
@@ -586,6 +690,27 @@ function BriefForm({
     onSubmitted();
   }
 
+  async function uploadOwn(file: File) {
+    if (!lastValues || !result?.campaignId) return;
+    setUploading(true);
+    try {
+      let media;
+      try {
+        media = await uploadOwnCreative(file);
+      } catch (err) {
+        setError((err as Error).message);
+        return;
+      }
+      await handleSubmit({ ...lastValues, has_creative_assets: "yes", creative_media: media } as FormValues, {
+        regenerate_of: result.campaignId,
+      });
+    } catch {
+      // handleSubmit already recorded the error.
+    } finally {
+      setUploading(false);
+    }
+  }
+
   async function regenerate() {
     if (!lastValues || !result?.campaignId) return;
     setRegenerating(true);
@@ -602,7 +727,14 @@ function BriefForm({
     return (
       <>
         {error && <p className="mt-3 text-xs text-red-600">{error}</p>}
-        <PreviewPanel result={result} onDone={() => setResult(null)} onRegenerate={regenerate} regenerating={regenerating} />
+        <PreviewPanel
+          result={result}
+          onDone={() => setResult(null)}
+          onRegenerate={regenerate}
+          regenerating={regenerating}
+          onUploadOwn={uploadOwn}
+          uploading={uploading}
+        />
       </>
     );
   }
@@ -887,6 +1019,9 @@ export default function AdsPanel({
                           >
                             {editingId === c.id ? "Close edit" : "Edit"}
                           </button>
+                        )}
+                        {["error", "declined", "rejected", "pending_human"].includes(c.status) && (
+                          <DeleteFailedButton campaignId={c.id} onDone={() => router.refresh()} />
                         )}
                         {editingId === c.id && (
                           <EditCampaignForm

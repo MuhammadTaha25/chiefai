@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getUnhealthyMailboxIds } from "@/lib/mailbox-health";
 import { getMailboxReadiness } from "@/lib/mailgun";
+import { effectiveDailyLimit } from "@/lib/warmup-schedule";
 
 /**
  * Picks a mailbox this client can actually send from — one whose Mailgun
@@ -54,15 +55,7 @@ export function startOfSendDay(): string {
   return d.toISOString();
 }
 
-/** Warmup ramp: the stored daily_send_limit is the day-1 base; it grows by WARMUP_STEP per full day since the mailbox was created, up to WARMUP_CAP. */
-export const WARMUP_STEP = 2;
-export const WARMUP_CAP = 30;
-export function effectiveDailyLimit(m: { daily_send_limit: number | null; created_at?: string | null }, now = Date.now()): number {
-  const base = Math.max(0, m.daily_send_limit ?? 0);
-  if (base === 0) return 0;
-  const ageDays = m.created_at ? Math.max(0, Math.floor((now - new Date(m.created_at).getTime()) / 86400000)) : 0;
-  return Math.max(base, Math.min(WARMUP_CAP, base + WARMUP_STEP * ageDays));
-}
+export { WARMUP_CAP, coldLimitForAge, effectiveDailyLimit } from "@/lib/warmup-schedule";
 
 export type MailboxReservation =
   | { ok: true; mailbox: { id: string; address: string }; reservationId: string }
@@ -100,14 +93,17 @@ export async function reserveMailboxSlot(
   admin: SupabaseClient,
   clientId: string,
   leadId: string,
-  row: { touch_number: number; campaign_id?: string | null; subject?: string; body?: string }
+  row: { touch_number: number; campaign_id?: string | null; subject?: string; body?: string },
+  options?: { mailboxId?: string }
 ): Promise<MailboxReservation> {
-  const { data: mailboxes } = await admin
+  const { data: allMailboxes } = await admin
     .from("mailboxes")
     .select("id, address, daily_send_limit, created_at")
     .eq("client_id", clientId)
     .order("created_at", { ascending: true })
     .returns<{ id: string; address: string; daily_send_limit: number | null; created_at: string }[]>();
+  // Block mode: only the mailbox whose block is running right now may send.
+  const mailboxes = options?.mailboxId ? (allMailboxes ?? []).filter((m) => m.id === options.mailboxId) : allMailboxes;
   if (!mailboxes || mailboxes.length === 0) return { ok: false, reason: "no_mailbox" };
 
   const { data: last } = await admin

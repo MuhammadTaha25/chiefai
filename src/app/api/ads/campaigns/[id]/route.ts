@@ -237,3 +237,35 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   return NextResponse.json({ ok: true, status: "declined", discarded: true });
 }
+
+/**
+ * Removes a failed or declined attempt from ChiefAI. Only rows that never reached
+ * the ads provider qualify, so a live, paused or published ad is never touched here.
+ */
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { user, client } = await getCurrentClient();
+  if (!user || !client) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+  const { id } = await params;
+  const admin = createAdminClient();
+  const { data: campaign } = await admin
+    .from("ad_campaigns")
+    .select("id, status, zernio_campaign_id")
+    .eq("id", id)
+    .eq("client_id", client.id)
+    .maybeSingle<{ id: string; status: string; zernio_campaign_id: string | null }>();
+  if (!campaign) return NextResponse.json({ error: "Ad campaign not found for this client" }, { status: 404 });
+
+  const removable = ["error", "declined", "rejected", "pending_human"];
+  if (campaign.zernio_campaign_id || !removable.includes(campaign.status)) {
+    return NextResponse.json(
+      { error: "Only failed or declined attempts that never reached the ads provider can be deleted here." },
+      { status: 409 }
+    );
+  }
+
+  await admin.from("ad_finance_decisions").delete().eq("ad_campaign_id", id);
+  const { error } = await admin.from("ad_campaigns").delete().eq("id", id).eq("client_id", client.id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
+}

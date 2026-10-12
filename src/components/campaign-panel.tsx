@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import SendWindowSettings from "@/components/send-window-settings";
+import OutreachTemplateSettings from "@/components/outreach-template-settings";
 import { useRouter } from "next/navigation";
 
 interface Campaign {
@@ -65,6 +67,8 @@ export default function CampaignPanel({ campaign: initialCampaign }: { campaign:
 
   return (
     <div className="panel panel-body space-y-4">
+      <SendWindowSettings />
+      <OutreachTemplateSettings />
       {!campaign ? (
         <div className="space-y-3">
           <p className="text-sm text-zinc-500">

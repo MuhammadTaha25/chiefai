@@ -210,8 +210,11 @@ export function validateAdBrief(brief: AdBriefInput, today: Date = new Date()): 
   if (inList(brief.ad_format, UNSUPPORTED_FORMATS)) {
     issues.push(err("unsupported_format", "ad_format", `"${cleanValue(brief.ad_format)}" isn't supported yet (${norm(brief.ad_format) === "carousel" ? "a carousel needs one asset per card" : "reusing a post needs a post id"}). Choose Image, Video or Reel.`));
   }
-  if (norm(brief.has_creative_assets) === "yes") {
-    issues.push(warn("own_assets_unsupported", "has_creative_assets", "Uploading your own images/videos isn't supported yet, so AI-generated creative is used. Swap the media in Meta Ads Manager if you prefer your own."));
+  // The user's own image/video is supported: it is uploaded from their PC and
+  // used as-is. Only warn when they said they have one but none is attached.
+  const uploaded = (brief.creative_media as { url?: string } | null | undefined)?.url;
+  if (norm(brief.has_creative_assets) === "yes" && !uploaded) {
+    issues.push(warn("own_assets_missing", "creative_media", "You said you have your own image or video, but none is uploaded yet. Upload it in Ad Creative, or AI-generated creative will be used."));
   }
   if (!cleanValue(brief.creative_focus)) {
     issues.push(warn("no_focus", "creative_focus", "No creative focus chosen — the ad will lead with the customer's problem."));

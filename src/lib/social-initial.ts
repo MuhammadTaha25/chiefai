@@ -5,6 +5,7 @@ import { generateAdVideo, generateSocialImage } from "@/lib/gemini";
 import {
   createStrategicItem,
   historyRow,
+  imagePromptFallback,
   loadContentHistory,
   publishToConnections,
   type ConnectionRef,
@@ -281,7 +282,7 @@ export async function processInitialRun(admin: SupabaseClient, run: RunRow): Pro
     if (!steps.image_post) {
       const history = await loadContentHistory(admin, clientId);
       imageItem = await createStrategicItem({ ctx, history, format: "image", forcePillar: "educational" });
-      const img = await generateSocialImage(imageItem.draft.imagePrompt || imageItem.draft.storyImagePrompt || imageItem.draft.topic, "1:1");
+      const img = await generateSocialImage(imageItem.draft.imagePrompt || imagePromptFallback(ctx, imageItem.draft.topic), "1:1");
       await runItem("image_post", imageItem, "image", { ...img, kind: "image" }, false);
     }
 
@@ -296,7 +297,7 @@ export async function processInitialRun(admin: SupabaseClient, run: RunRow): Pro
           format: "story",
           supports: { ...feed, topic: feed.topic, hook: feed.hook ?? feed.topic, caption: feed.caption },
         });
-        const img = await generateSocialImage(item.draft.storyImagePrompt || item.draft.imagePrompt || item.draft.topic, "9:16");
+        const img = await generateSocialImage(item.draft.storyImagePrompt || imagePromptFallback(ctx, item.draft.topic), "9:16");
         const res = await runItem("image_story", item, "story", { ...img, kind: "image" }, true);
         await attachStory(feed.id, res);
       }

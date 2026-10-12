@@ -74,6 +74,19 @@ function finalCaption(draft: StrategicContentDraft, plan: ContentPlan, story: bo
 }
 
 /**
+ * Image prompt used when the writer returned none (or a generic one). Anchors the
+ * picture to the client's own business so it is never a stock image of "the topic"
+ * alone: name, industry and services come from the client's profile.
+ */
+export function imagePromptFallback(ctx: BusinessContext, topic: string): string {
+  const who = ctx.businessName ? `for ${ctx.businessName}` : "for this business";
+  const industry = ctx.industry ? `, in the ${ctx.industry} industry` : "";
+  const service = ctx.services ? ` Related to its services: ${ctx.services}.` : "";
+  const style = ctx.visualStyle ? ` Visual style: ${ctx.visualStyle}.` : "";
+  return `Social media image ${who}${industry}. Topic: ${topic}.${service}${style} Brand-safe, no text, no logos, no real identifiable people.`.slice(0, 1200);
+}
+
+/**
  * Plan + write one item. Retries once with the reason if the result repeats
  * recent content or breaks the business's own rules; if it still does, it
  * throws so nothing off-strategy is ever published.

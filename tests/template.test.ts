@@ -49,6 +49,17 @@ test("missing variables are dropped, never invented", () => {
 
 import { bareDomain } from "../src/lib/outreach-template.ts";
 
+test("opener uses the recipient's job title when the industry is unknown; industry still wins when known", () => {
+  const withTitle = buildTemplateEmail({ ...vars, industry: null, jobTitle: "Practice Owner" });
+  assert.ok(withTitle.body.includes("I came across Acme Dental and noticed your role as Practice Owner."));
+  assert.deepEqual(lintOutreachEmail(withTitle), []);
+  const withBoth = buildTemplateEmail({ ...vars, jobTitle: "Practice Owner" });
+  assert.ok(withBoth.body.includes("you're working in dental care."));
+  assert.ok(!withBoth.body.includes("Practice Owner"));
+  const neither = buildTemplateEmail({ ...vars, industry: null, jobTitle: null });
+  assert.ok(neither.body.includes("I came across Acme Dental and wanted to reach out."));
+});
+
 test("website in the signature is a bare domain, so a real client's site never trips the no-links rule", () => {
   assert.equal(bareDomain("https://www.infomist.com/"), "infomist.com");
   assert.equal(bareDomain("http://Example.COM/path?x=1"), "example.com");

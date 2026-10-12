@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isCronRequest } from "@/lib/webhook-security";
 import { generateAdVideo, generateSocialImage } from "@/lib/gemini";
-import { createStrategicItem, historyRow, loadContentHistory, publishToConnections, type StrategicItem } from "@/lib/social-content";
+import { createStrategicItem, historyRow, imagePromptFallback, loadContentHistory, publishToConnections, type StrategicItem } from "@/lib/social-content";
 import { dueFromItems, dueItems, isValidTimeZone, localClock, parseWeeklyPlan, planItems, slotKey, weeklyItems, type ScheduleInput, type WeeklyPlan } from "@/lib/social-schedule";
 import { logEvent } from "@/lib/log-event";
 
@@ -83,7 +83,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ type
   }
 
   const admin = createAdminClient();
-  const defaultTz = process.env.CONTENT_TIMEZONE || "Asia/Karachi";
   const at = req.nextUrl.searchParams.get("at");
   // ?dry=1 reports which slots WOULD be generated (no generation, no publishing, no writes) — for checking a schedule.
   const dry = req.nextUrl.searchParams.get("dry") === "1";
@@ -149,7 +148,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ type
     const weeklyPlan: WeeklyPlan | null = rows.map((r) => parseWeeklyPlan(r.weekly_plan)).find(Boolean) ?? null;
     const planned = weeklyPlan ? planItems(weeklyPlan, input.postTime, input.storyTime) : weeklyItems(input);
     const tzPref = rows.map((r) => r.timezone).find(isValidTimeZone);
-    const clock = localClock(tzPref ?? defaultTz, new Date(), at);
+    // No Karachi fallback: posts run on the client's own clock, so a client without a timezone is skipped.
+    if (!tzPref) {
+      results.push({ client_id: clientId, slot: type, result: "skipped", detail: "client timezone not set" });
+      continue;
+    }
+    const clock = localClock(tzPref, new Date(), at);
 
     const due = weeklyPlan ? dueFromItems(planned, clock, type) : dueItems(input, clock, type);
     for (const item of due) {
@@ -217,13 +221,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ type
           if (!dl.ok) throw new Error(`Could not fetch the video to reuse as a story: ${dl.status}`);
           media = { base64: Buffer.from(await dl.arrayBuffer()).toString("base64"), mimeType: dl.headers.get("content-type") ?? "video/mp4", kind: "video" };
         } else {
-          const prompt = format === "story" ? strategic.draft.storyImagePrompt : strategic.draft.imagePrompt || strategic.draft.storyImagePrompt || strategic.draft.topic;
-          media = { ...(await generateSocialImage((prompt || strategic.draft.topic).slice(0, 1200), format === "story" ? "9:16" : "1:1")), kind: "image" };
+          const prompt = format === "story" ? strategic.draft.storyImagePrompt : strategic.draft.imagePrompt || strategic.draft.storyImagePrompt;
+          media = { ...(await generateSocialImage((prompt || imagePromptFallback(ctx, strategic.draft.topic)).slice(0, 1200), format === "story" ? "9:16" : "1:1")), kind: "image" };
         }
 
         let extraSlides: { base64: string; mimeType: string }[] | undefined;
         if (isCarousel) {
-          const base = strategic.draft.imagePrompt || strategic.draft.topic;
+          const base = strategic.draft.imagePrompt || imagePromptFallback(ctx, strategic.draft.topic);
           const more: { base64: string; mimeType: string }[] = [];
           for (const note of slideNotes.slice(1)) {
             const img = await generateSocialImage(`${base}\n\n${note} Same style and palette as the other slides.`.slice(0, 1200), "1:1");

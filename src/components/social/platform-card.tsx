@@ -105,7 +105,7 @@ export default function PlatformCard({
           {active && settings && (
             <div className="tile p-3 space-y-1 type-caption text-ink-secondary">
               <p className="num text-ink">
-                Saved preference: {settings.posts_per_week} posts/week{settings.stories_enabled ? ` · ${settings.stories_per_week} stories/week` : ""} (AI posts are created on the daily schedule; the weekly numbers are preferences only)
+                Saved preference: {settings.posts_per_week} posts/week{settings.stories_enabled ? ` · ${settings.stories_per_week} stories/week` : ""} (posts are made on the daily schedule; the weekly numbers only record your preference)
               </p>
               <ul className="space-y-0.5">
                 <li className="text-ink-tertiary">✓ Post creation and publishing — from the Content page</li>

@@ -349,6 +349,13 @@ export async function POST(
       if (financeRes.ok) {
         const financeData = await financeRes.json();
         adAccountCurrency = typeof financeData?.currency === "string" ? financeData.currency : null;
+        // Meta rejects ad sets below its minimum daily budget (PKR 250 in a PKR account).
+        if (adAccountCurrency === "PKR" && dailyBudget < 250) {
+          return NextResponse.json(
+            { error: "Meta needs at least PKR 250 per day for this ad set in your ad account's currency. Raise the daily budget and submit again." },
+            { status: 400 }
+          );
+        }
         if (!financeData?.fundingSource) {
           return NextResponse.json(
             {

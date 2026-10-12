@@ -63,11 +63,11 @@ Write:
 - hook: the first line that stops the scroll (${isVideo ? "spoken/on-screen opener for the video" : "opening line of the caption"})
 - caption: ${params.format === "story" ? "very short (under 120 characters)" : "engaging, 2-5 short lines, ending with the CTA line"}. Educational content must be genuinely useful. Only state facts found in the business context; no invented prices, offers, results, awards or testimonials. No fake urgency.
 - hashtags: 6 to 10 relevant hashtags WITHOUT the # symbol (mix broad and niche; no follow4follow-style spam)
-- imagePrompt: detailed prompt for a square 1:1 feed image that visualises the topic (empty string if the format is video)
-- storyImagePrompt: detailed prompt for a vertical 9:16 story image that teases the same topic in a different composition
+- imagePrompt: detailed prompt for a square 1:1 feed image that visualises the topic FOR THIS BUSINESS (empty string if the format is video). Name the business's industry and the real service/product it is about, and show a situation a real customer of this business would recognise. Do not use generic stock imagery that could belong to any company.
+- storyImagePrompt: detailed prompt for a vertical 9:16 story image that teases the same topic for this business in a different composition, with the same industry cues
 - videoPrompt: ${isVideo ? "a detailed prompt for an 8-second vertical 9:16 cinematic clip that visualises the topic; end the prompt with: A narrator says aloud: \"<the hook, verbatim>\"" : "empty string"}
 
-Image/video rules: brand-safe, minimal or no text (models garble text), no real identifiable people, no logos or watermarks. Follow the brand's visual style and colors if they are in the business context.
+Image/video rules: brand-safe, minimal or no text (models garble text), no real identifiable people, no logos or watermarks. Follow the brand's visual style and colors if they are in the business context. The image must be about what this business actually does: use its industry, services and audience from the business context, and never add products, places or claims that are not listed there. If the business context has no industry or services, keep the image to the topic and avoid making up a specific industry.
 
 Respond with ONLY valid JSON: {"topic": string, "hook": string, "caption": string, "hashtags": string[], "imagePrompt": string, "storyImagePrompt": string, "videoPrompt": string}`;
 
