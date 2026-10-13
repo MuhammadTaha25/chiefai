@@ -2,7 +2,7 @@ import { reserveMailboxSlot, finalizeReservation, releaseReservation } from "@/l
 import { getClientBusinessContext, formatBusinessContext } from "@/lib/business-context";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { FORM_LEAD_SOURCE, autoSendSince } from "@/lib/campaign";
-import { draftOfferPhrases } from "@/lib/gemini";
+import { draftOfferPhrases, draftAidaEmail } from "@/lib/gemini";
 import { bareDomain, buildTemplateEmail } from "@/lib/outreach-template";
 import { renderCustomTemplate } from "@/lib/custom-template";
 import { cleanOutreachEmail, lintOutreachEmail } from "@/lib/email-quality";
@@ -236,14 +236,13 @@ export async function sendBatchForClient(clientId: string) {
       const isBusinessLead = !lead.job_title || (lead.name ?? "").trim().toLowerCase() === (lead.company ?? "").trim().toLowerCase();
       const senderCompany = clientRow?.company_name ?? "us";
 
-      // The client's own template when it is set and passes the lint for this lead; otherwise the fixed template.
-      // A draft that cannot pass is NOT sent (it would hurt the mailbox's reputation); the lead stays "new" for the next run.
-      const fixedDraft = cleanOutreachEmail(
+      // Try AIDA AI draft first; fall back to fixed template if it fails or fails the lint.
+      // This gives each lead a personalised email while keeping deliverability as the hard backstop.
+      let fixedDraft = cleanOutreachEmail(
         buildTemplateEmail({
           firstName: isBusinessLead ? null : lead.name,
           leadCompany: lead.company || "your company",
           industry,
-          // Only a real person's title (never for directory business leads); the fixed structure stays the same.
           jobTitle: isBusinessLead ? null : lead.job_title ?? null,
           offer: phrases.offer,
           benefit: phrases.benefit,
@@ -252,6 +251,22 @@ export async function sendBatchForClient(clientId: string) {
         })
       );
       let draft = fixedDraft;
+      try {
+        const aidaDraft = cleanOutreachEmail(
+          await draftAidaEmail({
+            sellingDescription,
+            senderCompany,
+            leadName: isBusinessLead ? (lead.company || "there") : (lead.name || "there"),
+            leadCompany: lead.company || "your company",
+            leadTitle: isBusinessLead ? null : (lead.job_title ?? null),
+            businessContext,
+          })
+        );
+        // Only use the AIDA draft if it passes all deliverability checks; otherwise keep the fixed template.
+        if (lintOutreachEmail(aidaDraft).length === 0) draft = aidaDraft;
+      } catch {
+        // AIDA generation failed (rate-limit, timeout, etc.) — fixed template is already set.
+      }
       if (clientRow?.outreach_template_body && clientRow?.outreach_template_subject) {
         const custom = cleanOutreachEmail(
           renderCustomTemplate(clientRow.outreach_template_subject, clientRow.outreach_template_body, {
