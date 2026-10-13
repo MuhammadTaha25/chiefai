@@ -110,7 +110,12 @@ function metaAdAccountId(platform: string, accountId: string) {
       const raw =
         metadata?.subscribedAdAccountIds?.[0] ??
         metadata?.enumeratedAdAccountIds?.[0]?.replace(/^act_/, "");
-      return raw ? String(raw).replace(/^act_/, "") : null;
+      if (raw) return String(raw).replace(/^act_/, "");
+      // Last-resort fallback: if Zernio hasn't propagated the ad account link
+      // yet (common for newly-connected pages), use the env-var override so
+      // the user can unblock themselves without waiting for Zernio to sync.
+      const envOverride = process.env.META_AD_ACCOUNT_ID_OVERRIDE;
+      return envOverride ? String(envOverride).replace(/^act_/, "") : null;
     })
     .catch(() => null);
 }
