@@ -183,27 +183,51 @@ export async function POST(req: NextRequest) {
 
   const admin = createAdminClient();
 
-  // Record the intent first, so a failure AFTER Zernio accepted the post is
-  // still visible in the Content page rather than vanishing.
-  const { data: row, error: insertError } = await admin
-    .from("social_posts")
-    .insert({
-      client_id: client.id,
-      platform,
-      content_type: resolvedContentType(postType, [
-        ...urlsIn.map((u) => ({ type: mediaKindFromUrl(u), url: u })),
-        ...uploadsIn.map((u) => ({ type: mediaKind(u.mime), url: "" })),
-      ]),
-      topic: typeof body.topic === "string" ? body.topic : null,
-      caption,
-      media_url: urlsIn[0] ?? null,
-      status: "creating",
-    })
-    .select("id")
-    .single<{ id: string }>();
+  // If caller passes existing_post_id (publish-draft flow), reuse that row.
+  const existingPostId = typeof body.existing_post_id === "string" && body.existing_post_id
+    ? body.existing_post_id
+    : null;
 
-  if (insertError || !row) {
-    return NextResponse.json({ error: `Could not record the post: ${insertError?.message}` }, { status: 500 });
+  let row: { id: string };
+
+  if (existingPostId) {
+    // Verify ownership
+    const { data: existing } = await admin
+      .from("social_posts")
+      .select("id, status")
+      .eq("id", existingPostId)
+      .eq("client_id", client.id)
+      .maybeSingle<{ id: string; status: string | null }>();
+
+    if (!existing) return NextResponse.json({ error: "Post not found" }, { status: 404 });
+    if (existing.status === "published") return NextResponse.json({ error: "Already published" }, { status: 400 });
+
+    await admin.from("social_posts").update({ status: "creating", caption: caption || undefined }).eq("id", existingPostId);
+    row = { id: existingPostId };
+  } else {
+    // Record the intent first, so a failure AFTER Zernio accepted the post is
+    // still visible in the Content page rather than vanishing.
+    const { data: inserted, error: insertError } = await admin
+      .from("social_posts")
+      .insert({
+        client_id: client.id,
+        platform,
+        content_type: resolvedContentType(postType, [
+          ...urlsIn.map((u) => ({ type: mediaKindFromUrl(u), url: u })),
+          ...uploadsIn.map((u) => ({ type: mediaKind(u.mime), url: "" })),
+        ]),
+        topic: typeof body.topic === "string" ? body.topic : null,
+        caption,
+        media_url: urlsIn[0] ?? null,
+        status: "creating",
+      })
+      .select("id")
+      .single<{ id: string }>();
+
+    if (insertError || !inserted) {
+      return NextResponse.json({ error: `Could not record the post: ${insertError?.message}` }, { status: 500 });
+    }
+    row = inserted;
   }
 
   try {
