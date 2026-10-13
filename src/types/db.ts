@@ -68,6 +68,8 @@ export interface SocialPost {
   status: string | null;
   zernio_post_id: string | null;
   published_at: string | null;
+  scheduled_for: string | null;
+  created_at: string | null;
 }
 
 export interface BudgetRequest {

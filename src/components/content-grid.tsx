@@ -222,12 +222,19 @@ export default function ContentGrid({ posts: initialPosts }: { posts: SocialPost
                 <span className={`rounded-full px-2 py-0.5 text-xs ${
                   post.status === "published"
                     ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300"
+                    : post.status === "scheduled"
+                    ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
                     : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
                 }`}>
                   {post.status || "draft"}
                 </span>
               </div>
               <p className="mt-2 line-clamp-3 text-sm">{post.caption || post.topic || "—"}</p>
+              {post.status === "scheduled" && post.scheduled_for && (
+                <p className="mt-1 text-[10px] text-blue-600 dark:text-blue-400">
+                  Scheduled: {new Date(post.scheduled_for).toLocaleString()}
+                </p>
+              )}
 
               {post.status !== "published" && (
                 <div className="mt-3 space-y-1">
