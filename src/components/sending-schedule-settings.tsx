@@ -64,8 +64,8 @@ export default function SendingScheduleSettings() {
       .then((d) => {
         if (d.ok) {
           setTimezone(d.timezone ?? "");
-          setSendStart(d.sendStart ?? "08:00");
-          setSendEnd(d.sendEnd ?? "20:00");
+          setSendStart((d.sendStart ?? "08:00").slice(0, 5));
+          setSendEnd((d.sendEnd ?? "20:00").slice(0, 5));
           setFollowUpDays(Number(d.followUpDays) || 3);
         }
       })
