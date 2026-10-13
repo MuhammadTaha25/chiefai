@@ -106,6 +106,59 @@ const PREVIEW_LABELS: Record<string, string> = {
   FACEBOOK_STORY_MOBILE: "Facebook story",
 };
 
+/** Pause or resume a launched/live campaign. */
+function PauseResumeButton({
+  campaignId,
+  currentStatus,
+  onDone,
+}: {
+  campaignId: string;
+  currentStatus: string;
+  onDone: () => void;
+}) {
+  const isPaused = currentStatus === "paused";
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function toggle() {
+    setBusy(true);
+    setError(null);
+    const action = isPaused ? "resume" : "pause";
+    try {
+      const res = await fetch(`/api/ads/campaigns/${campaignId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `${action} failed`);
+      onDone();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        onClick={toggle}
+        disabled={busy}
+        className={`w-full rounded-md border py-1 text-[11px] font-medium disabled:opacity-50 ${
+          isPaused
+            ? "border-green-300 text-green-700 hover:bg-green-50 dark:border-green-800 dark:text-green-400 dark:hover:bg-green-950"
+            : "border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-950"
+        }`}
+      >
+        {busy ? (isPaused ? "Resuming…" : "Pausing…") : isPaused ? "▶ Resume" : "⏸ Pause"}
+      </button>
+      {error && <p className="mt-1 text-[10px] text-red-600 dark:text-red-400">{error}</p>}
+    </div>
+  );
+}
+
 /** Publish or discard one reviewed draft, from anywhere in the panel. */
 function useDraftAction(campaignId: string, onDone: () => void) {
   const [busy, setBusy] = useState<"publish" | "discard" | null>(null);
@@ -1001,6 +1054,18 @@ export default function AdsPanel({
                         {isDraft && c.zernio_campaign_id && (
                           <PublishButtons campaignId={c.id} onDone={() => router.refresh()} compact />
                         )}
+                        {/* Pause/Resume for live campaigns and for paused ones that were
+                            previously launched (launched_at is set). A paused DRAFT
+                            (never published) uses PublishButtons above, not this. */}
+                        {(["launched", "live"].includes(c.status) ||
+                          (c.status === "paused" && c.launched_at)) &&
+                          c.zernio_campaign_id && (
+                            <PauseResumeButton
+                              campaignId={c.id}
+                              currentStatus={c.status}
+                              onDone={() => router.refresh()}
+                            />
+                          )}
                         {c.status === "error" && c.error_message && (
                           <p className="mt-1 text-red-600 dark:text-red-400">{friendlyAdError(c.error_message)}</p>
                         )}

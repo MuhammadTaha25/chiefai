@@ -3,7 +3,9 @@ import { getClientBusinessContext, formatBusinessContext } from "@/lib/business-
 import { createAdminClient } from "@/lib/supabase/admin";
 import { FORM_LEAD_SOURCE, autoSendSince } from "@/lib/campaign";
 import { draftOfferPhrases, draftAidaEmail } from "@/lib/gemini";
-import { fetchCompanyDescription } from "@/lib/explorium";
+import { fetchCompanyDescriptionViaMcp } from "@/lib/vibe-prospecting-mcp";
+// Note: fetchCompanyDescriptionViaMcp uses the already-connected Vibe Prospecting OAuth session.
+// No separate API key needed — falls back gracefully to null if not connected or any error.
 import { bareDomain, buildTemplateEmail } from "@/lib/outreach-template";
 import { renderCustomTemplate } from "@/lib/custom-template";
 import { cleanOutreachEmail, lintOutreachEmail } from "@/lib/email-quality";
@@ -29,6 +31,8 @@ interface EligibleLead {
   company: string | null;
   job_title: string | null;
   email: string;
+  city: string | null;
+  country: string | null;
 }
 
 /**
@@ -149,7 +153,7 @@ export async function sendBatchForClient(clientId: string) {
   const since = autoSendSince();
   let eligibleQuery = admin
     .from("leads")
-    .select("id, name, company, job_title, email")
+    .select("id, name, company, job_title, email, city, country")
     .eq("campaign_id", campaign.id)
     .eq("lead_source", FORM_LEAD_SOURCE)
     .eq("status", "new")
@@ -256,7 +260,7 @@ export async function sendBatchForClient(clientId: string) {
         // Fetch company description from Explorium for richer personalisation.
         // Runs in parallel with nothing else — failure silently returns null
         // and we fall back to the plain businessContext already set above.
-        const companyDesc = await fetchCompanyDescription({
+        const companyDesc = await fetchCompanyDescriptionViaMcp({
           companyName: lead.company || "",
           companyDomain: null,
         });
@@ -271,6 +275,8 @@ export async function sendBatchForClient(clientId: string) {
             leadName: isBusinessLead ? (lead.company || "there") : (lead.name || "there"),
             leadCompany: lead.company || "your company",
             leadTitle: isBusinessLead ? null : (lead.job_title ?? null),
+            leadCity: lead.city ?? null,
+            leadCountry: lead.country ?? null,
             businessContext: enrichedContext,
           })
         );

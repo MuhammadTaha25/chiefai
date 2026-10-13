@@ -833,43 +833,77 @@ export async function POST(
     }
 
     // ---- 6. Finance gate (still BEFORE any spend) ------------------------
-    const { data: decision, error: decisionError } = await admin.rpc("decide_ad_finance", {
-      p_client_id: client.id,
-      p_ad_campaign_id: campaign.id,
+    //
+    // First-week bypass: if this client has never had a launched/live campaign
+    // before, skip the finance gate entirely for the first 7 days after their
+    // first ad account connection. This lets new users run their first ad
+    // without waiting for the finance oracle to build a spend history.
+    // After that window, every ad goes through the gate as normal.
+    const { count: priorLaunchedCount } = await admin
+      .from("ad_campaigns")
+      .select("id", { count: "exact", head: true })
+      .eq("client_id", client.id)
+      .in("status", ["launched", "live", "approved"])
+      .neq("id", campaign.id);
+
+    const { data: firstConnection } = await admin
+      .from("social_connections")
+      .select("created_at")
+      .eq("client_id", client.id)
+      .in("platform", ["facebook_ads", "instagram_ads", "google_ads"])
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle<{ created_at: string }>();
+
+    const firstWeekBypass = (() => {
+      if ((priorLaunchedCount ?? 0) > 0) return false; // already has a launched ad
+      if (!firstConnection?.created_at) return false;
+      const daysSinceConnect = (Date.now() - new Date(firstConnection.created_at).getTime()) / 86400000;
+      return daysSinceConnect <= 7;
+    })();
+
+    if (!firstWeekBypass) {
+      const { data: decision, error: decisionError } = await admin.rpc("decide_ad_finance", {
+        p_client_id: client.id,
+        p_ad_campaign_id: campaign.id,
+      });
+
+      if (decisionError) {
+        throw new Error(`Finance decision failed: ${decisionError.message}`);
+      }
+
+      const decisionValue = String(decision).replace(/"/g, "").trim();
+
+      if (decisionValue !== "approved") {
+        const status = ["declined", "pending_human", "rejected"].includes(decisionValue) ? decisionValue : "error";
+        // A "pending_human" hold is almost always the finance gate finding a
+        // prior ad with no synced performance yet — a state that is invisible in
+        // the ledger. Say exactly what happened and how to clear it instead of
+        // reporting a bare status the user cannot act on.
+        const holdReason =
+          decisionValue === "pending_human"
+            ? "Finance held this ad because a previous ad has no synced performance data yet. The reason is in the Finance table below; the hourly ads sync now writes performance, so this clears itself once that ad has delivered — or you can send it to Finance manually."
+            : `Finance ${decisionValue} this ad, so no money was spent. The reason is in the Finance table below.`;
+        await updateCampaign(admin, campaign.id, {
+          status,
+          error_message: holdReason,
+        });
+        await admin.from("ad_generation_jobs").update({ status: "completed", last_error: holdReason }).eq("id", job.id);
+        return NextResponse.json({
+          ok: true,
+          job,
+          campaignId: campaign.id,
+          status: decisionValue,
+          live: false,
+          warning: holdReason,
+        });
+      }
+    }
+
+    await updateCampaign(admin, campaign.id, {
+      status: "approved",
+      ...(firstWeekBypass ? { error_message: "First-week bypass: finance gate skipped for new account." } : {}),
     });
-
-    if (decisionError) {
-      throw new Error(`Finance decision failed: ${decisionError.message}`);
-    }
-
-    const decisionValue = String(decision).replace(/"/g, "").trim();
-
-    if (decisionValue !== "approved") {
-      const status = ["declined", "pending_human", "rejected"].includes(decisionValue) ? decisionValue : "error";
-      // A "pending_human" hold is almost always the finance gate finding a
-      // prior ad with no synced performance yet — a state that is invisible in
-      // the ledger. Say exactly what happened and how to clear it instead of
-      // reporting a bare status the user cannot act on.
-      const holdReason =
-        decisionValue === "pending_human"
-          ? "Finance held this ad because a previous ad has no synced performance data yet. The reason is in the Finance table below; the hourly ads sync now writes performance, so this clears itself once that ad has delivered — or you can send it to Finance manually."
-          : `Finance ${decisionValue} this ad, so no money was spent. The reason is in the Finance table below.`;
-      await updateCampaign(admin, campaign.id, {
-        status,
-        error_message: holdReason,
-      });
-      await admin.from("ad_generation_jobs").update({ status: "completed", last_error: holdReason }).eq("id", job.id);
-      return NextResponse.json({
-        ok: true,
-        job,
-        campaignId: campaign.id,
-        status: decisionValue,
-        live: false,
-        warning: holdReason,
-      });
-    }
-
-    await updateCampaign(admin, campaign.id, { status: "approved" });
 
     // ---- 7. Create the live campaign + ad set + ad -----------------------
     const ad = await createMetaAd(group, {

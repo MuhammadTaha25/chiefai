@@ -151,36 +151,54 @@ export async function draftAidaEmail(params: {
   leadName: string;
   leadCompany: string;
   leadTitle: string | null;
+  leadCity?: string | null;
+  leadCountry?: string | null;
   tone?: string;
   callToAction?: string;
   businessContext?: string;
 }): Promise<AidaEmail> {
-  const prompt = `${params.businessContext ? params.businessContext + "\n\n" : ""}You are an expert cold-email copywriter. Write ONE cold outreach email using the AIDA formula (Attention, Interest, Desire, Action).
+  // Build lead context string — only include fields we actually have
+  const leadLines: string[] = [
+    `- Business/Name: ${untrusted(params.leadName, 200)}`,
+    `- Company: ${untrusted(params.leadCompany, 200)}`,
+  ];
+  if (params.leadTitle) leadLines.push(`- Role: ${untrusted(params.leadTitle, 200)}`);
+  if (params.leadCity || params.leadCountry) {
+    const loc = [params.leadCity, params.leadCountry].filter(Boolean).join(", ");
+    leadLines.push(`- Location: ${untrusted(loc, 200)}`);
+  }
+  if (params.businessContext) leadLines.push(`\nExtra context:\n${params.businessContext}`);
 
-CAMPAIGN OBJECTIVE — what the sender (${params.senderCompany}) is promoting in this outreach:
-"""
+  const prompt = `You are writing a cold outreach email on behalf of ${params.senderCompany}. This email must sound like it was written by a real human salesperson — natural, conversational, brief. Not a template. Not AI-generated.
+
+What ${params.senderCompany} offers:
 ${untrusted(params.sellingDescription)}
-"""
 
-LEAD CONTEXT — the recipient:
-- Name: ${untrusted(params.leadName,200)}
-- Company: ${untrusted(params.leadCompany,200)}
-- Title: ${untrusted(params.leadTitle ?? "unknown",200)}
+About the recipient:
+${leadLines.join("\n")}
 
-Tone: ${params.tone ?? "professional, warm, concise"}
-Desired call to action: ${params.callToAction ?? "reply to book a short call"}
+Desired outcome: ${params.callToAction ?? "get a reply and book a short call"}
 
-Rules (this email must land in the inbox, not spam):
-- Structure: greeting by first name; ONE sentence that is specific to their company/role (proof you looked); one sentence on the problem it likely has; one sentence on how the sender helps, in plain words; ONE question as the call to action; sign off with the sender company name.
-- 60 to 120 words. Short paragraphs of 1-2 sentences.
-- Subject: under 50 characters, lower-key and specific (e.g. "Quick question about {their company}"). No exclamation marks, no ALL CAPS, no emoji, no "Re:" or "Fwd:".
-- Never use spam-trigger words or hype: free, guarantee, act now, limited time, click here, buy now, 100%, risk-free, urgent, "double your", cash, winner.
-- No links, no images, no attachments, no phone-number blocks in this first email. No bullet lists, no bold, no markdown.
-- No generic filler like "I hope this email finds you well". Don't mention "unsubscribe" (a footer is added automatically).
-- Do not invent facts, statistics, customers or results about the recipient or the sender.
-- Plain text only.
+Write the email body and subject line following these principles:
 
-Respond with ONLY valid JSON matching exactly: {"subject": string, "body": string}`;
+AIDA structure (but don't make it obvious — it should flow naturally):
+- Attention: open with something specific to them (their business type, location, or what they likely deal with day-to-day) — NOT a generic opener
+- Interest: one sentence on a real challenge businesses like theirs typically face
+- Desire: one sentence on how ${params.senderCompany} can help — plain words, no hype
+- Action: one soft question (not a demand) as the CTA
+
+Voice & style:
+- Write like a real person emailing another real person — short, direct, no corporate speak
+- Vary sentence length naturally. Use contractions (we're, it's, you'd).
+- Opening: use their first name or business name — do NOT start with "I hope", "I came across", or "My name is"
+- Subject line: conversational and specific, like something a colleague would write (e.g. "quick question about [their business]" or "idea for [their company]") — lowercase preferred, under 8 words
+- 70–110 words total for the body. One short paragraph or two very short ones.
+- Plain text only. No bullet points, no bold, no links, no attachments.
+- Sign off casually: just the sender's first name or company name — no titles, no phone numbers
+- Never use: free, guarantee, act now, limited time, click here, buy now, 100%, risk-free, urgent, double your, cash, winner, "I wanted to reach out", "touch base", "circle back", "synergy"
+- Do not make up facts, statistics, or claim results you don't know
+
+Respond with ONLY valid JSON: {"subject": string, "body": string}`;
 
   return generateJson<AidaEmail>(prompt);
 }
