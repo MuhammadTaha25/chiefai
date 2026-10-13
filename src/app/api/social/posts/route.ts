@@ -169,8 +169,10 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // The account id comes from OUR row for THIS client — never from the browser.
-  const { data: connection } = await supabase
+  // Use admin client for connection lookup — avoids RLS gaps where a user row
+  // can't see its own social_connections if policies aren't perfectly set up.
+  const admin = createAdminClient();
+  const { data: connection } = await admin
     .from("social_connections")
     .select("zernio_account_id, connection_status")
     .eq("client_id", client.id)
@@ -180,8 +182,6 @@ export async function POST(req: NextRequest) {
   if (!connection || connection.connection_status !== "connected" || !connection.zernio_account_id) {
     return NextResponse.json({ error: `Connect ${platform} before publishing to it.` }, { status: 400 });
   }
-
-  const admin = createAdminClient();
 
   // If caller passes existing_post_id (publish-draft flow), reuse that row.
   const existingPostId = typeof body.existing_post_id === "string" && body.existing_post_id

@@ -129,7 +129,7 @@ export default function ContentGrid({ posts: initialPosts }: { posts: SocialPost
   const [status, setStatus] = useState("all");
   const [editPost, setEditPost] = useState<SocialPost | null>(null);
   const [publishingId, setPublishingId] = useState<string | null>(null);
-  const [publishError, setPublishError] = useState<string | null>(null);
+  const [publishErrors, setPublishErrors] = useState<Record<string, string>>({});
 
   const platforms = useMemo(
     () => ["all", ...Array.from(new Set(posts.map((p) => p.platform)))],
@@ -146,7 +146,7 @@ export default function ContentGrid({ posts: initialPosts }: { posts: SocialPost
 
   async function publishDraft(post: SocialPost) {
     setPublishingId(post.id);
-    setPublishError(null);
+    setPublishErrors((prev) => { const next = { ...prev }; delete next[post.id]; return next; });
     try {
       const res = await fetch("/api/social/posts", {
         method: "POST",
@@ -164,7 +164,7 @@ export default function ContentGrid({ posts: initialPosts }: { posts: SocialPost
       if (!res.ok) throw new Error(data.error || "Publish failed");
       setPosts((prev) => prev.map((p) => p.id === post.id ? { ...p, status: "published" } : p));
     } catch (e) {
-      setPublishError((e as Error).message);
+      setPublishErrors((prev) => ({ ...prev, [post.id]: (e as Error).message }));
     } finally {
       setPublishingId(null);
     }
@@ -205,10 +205,6 @@ export default function ContentGrid({ posts: initialPosts }: { posts: SocialPost
         </select>
       </div>
 
-      {publishError && (
-        <p className="mt-3 text-sm text-red-600 dark:text-red-400">{publishError}</p>
-      )}
-
       <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         {filtered.map((post) => (
           <div key={post.id} className="overflow-hidden rounded-xl border border-black/[.08] dark:border-white/[.145]">
@@ -234,20 +230,25 @@ export default function ContentGrid({ posts: initialPosts }: { posts: SocialPost
               <p className="mt-2 line-clamp-3 text-sm">{post.caption || post.topic || "—"}</p>
 
               {post.status !== "published" && (
-                <div className="mt-3 flex gap-2">
-                  <button
-                    onClick={() => setEditPost(post)}
-                    className="flex-1 rounded-md border border-black/[.1] py-1 text-xs font-medium hover:bg-zinc-50 dark:border-white/[.145] dark:hover:bg-zinc-800"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => publishDraft(post)}
-                    disabled={publishingId === post.id}
-                    className="flex-1 rounded-md bg-zinc-900 py-1 text-xs font-semibold text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
-                  >
-                    {publishingId === post.id ? "…" : "Publish"}
-                  </button>
+                <div className="mt-3 space-y-1">
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setEditPost(post)}
+                      className="flex-1 rounded-md border border-black/[.1] py-1 text-xs font-medium hover:bg-zinc-50 dark:border-white/[.145] dark:hover:bg-zinc-800"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => publishDraft(post)}
+                      disabled={publishingId === post.id}
+                      className="flex-1 rounded-md bg-zinc-900 py-1 text-xs font-semibold text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
+                    >
+                      {publishingId === post.id ? "Publishing…" : "Publish"}
+                    </button>
+                  </div>
+                  {publishErrors[post.id] && (
+                    <p className="text-[10px] leading-tight text-red-600 dark:text-red-400">{publishErrors[post.id]}</p>
+                  )}
                 </div>
               )}
             </div>
