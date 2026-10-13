@@ -83,7 +83,8 @@ export function imagePromptFallback(ctx: BusinessContext, topic: string): string
   const industry = ctx.industry ? `, in the ${ctx.industry} industry` : "";
   const service = ctx.services ? ` Related to its services: ${ctx.services}.` : "";
   const style = ctx.visualStyle ? ` Visual style: ${ctx.visualStyle}.` : "";
-  return `Social media image ${who}${industry}. Topic: ${topic}.${service}${style} Brand-safe, no text, no logos, no real identifiable people.`.slice(0, 1200);
+  const colors = ctx.brandColors?.length ? ` Brand color palette: ${ctx.brandColors.join(", ")}.` : "";
+  return `Social media image ${who}${industry}. Topic: ${topic}.${service}${style}${colors} Brand-safe, no text, no logos, no real identifiable people.`.slice(0, 1200);
 }
 
 /**
@@ -140,6 +141,12 @@ export async function createStrategicItem(params: {
       supports: supports ? { topic: supports.topic, hook: supports.hook, caption: supports.caption } : undefined,
       rejectedBecause,
       ownerPillars: ctx.contentPillars,
+      // Brand visual identity — injected explicitly so image and caption generation
+      // uses the business's actual colors, style and tone rather than generic output.
+      brandColors: ctx.brandColors,
+      visualStyle: ctx.visualStyle,
+      captionStyles: ctx.captionStyles,
+      emojiStyle: ctx.emojiStyle,
     });
 
     if (!draft.caption || !draft.topic) {

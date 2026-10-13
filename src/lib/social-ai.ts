@@ -44,8 +44,31 @@ export async function planStrategicContent(params: {
   /** Why a previous attempt was rejected (repeat / restricted phrase / unsupported price). */
   rejectedBecause?: string;
   ownerPillars?: string[];
+  /** Brand visual identity — injected explicitly into image and caption prompts. */
+  brandColors?: string[];
+  visualStyle?: string;
+  captionStyles?: string[];
+  emojiStyle?: string;
 }): Promise<StrategicContentDraft> {
   const isVideo = params.format === "video";
+  const isStory = params.format === "story";
+
+  // Build brand style lines injected directly into image/caption instructions.
+  const brandColorLine = params.brandColors?.length
+    ? `Brand color palette: ${params.brandColors.join(", ")}.`
+    : "";
+  const visualStyleLine = params.visualStyle
+    ? `Visual style: ${params.visualStyle}.`
+    : "";
+  const captionStyleLine = params.captionStyles?.length
+    ? `Caption style guidance: ${params.captionStyles.join("; ")}.`
+    : "";
+  const emojiLine = params.emojiStyle
+    ? `Emoji usage: ${params.emojiStyle}.`
+    : "";
+  const brandVisualBlock = [brandColorLine, visualStyleLine].filter(Boolean).join(" ");
+  const brandCaptionBlock = [captionStyleLine, emojiLine].filter(Boolean).join(" ");
+
   const prompt = `${params.businessContext ? params.businessContext + "\n\n" : ""}${params.historyBlock ? params.historyBlock + "\n\n" : ""}You are ${params.companyName}'s social media strategist and copywriter.
 
 CONTENT BRIEF (already decided — do not change it):
@@ -61,13 +84,13 @@ ${params.ownerPillars?.length ? `- The owner likes these themes; use one only if
 Write:
 - topic: the specific subject (a concrete idea, not the pillar name)
 - hook: the first line that stops the scroll (${isVideo ? "spoken/on-screen opener for the video" : "opening line of the caption"})
-- caption: ${params.format === "story" ? "very short (under 120 characters)" : "engaging, 2-5 short lines, ending with the CTA line"}. Educational content must be genuinely useful. Only state facts found in the business context; no invented prices, offers, results, awards or testimonials. No fake urgency.
+- caption: ${isStory ? "very short (under 120 characters)" : "engaging, 2-5 short lines, ending with the CTA line"}. Educational content must be genuinely useful. Only state facts found in the business context; no invented prices, offers, results, awards or testimonials. No fake urgency.${brandCaptionBlock ? ` ${brandCaptionBlock}` : ""}
 - hashtags: 6 to 10 relevant hashtags WITHOUT the # symbol (mix broad and niche; no follow4follow-style spam)
-- imagePrompt: detailed prompt for a square 1:1 feed image that visualises the topic FOR THIS BUSINESS (empty string if the format is video). Name the business's industry and the real service/product it is about, and show a situation a real customer of this business would recognise. Do not use generic stock imagery that could belong to any company.
-- storyImagePrompt: detailed prompt for a vertical 9:16 story image that teases the same topic for this business in a different composition, with the same industry cues
+- imagePrompt: detailed prompt for a SQUARE 1:1 FEED IMAGE that visualises the topic FOR THIS BUSINESS (empty string if the format is video or story). Name the business's industry and the real service/product it is about, and show a situation a real customer of this business would recognise. Do not use generic stock imagery that could belong to any company.${brandVisualBlock ? ` Apply these brand visuals: ${brandVisualBlock}` : ""}
+- storyImagePrompt: detailed prompt for a VERTICAL 9:16 STORY/REEL IMAGE — portrait orientation, designed to fill a phone screen. Use a close-up or portrait crop that works in the tall format; avoid wide landscape compositions. Show the same topic for this business but with a fresh composition suited to stories: bold foreground subject, strong vertical lines or stacked layers. ${isStory ? "This IS the primary image for a story post — make it compelling and standalone." : "This teases the feed post as a story companion."}${brandVisualBlock ? ` Apply these brand visuals: ${brandVisualBlock}` : ""}
 - videoPrompt: ${isVideo ? "a detailed prompt for an 8-second vertical 9:16 cinematic clip that visualises the topic; end the prompt with: A narrator says aloud: \"<the hook, verbatim>\"" : "empty string"}
 
-Image/video rules: brand-safe, minimal or no text (models garble text), no real identifiable people, no logos or watermarks. Follow the brand's visual style and colors if they are in the business context. The image must be about what this business actually does: use its industry, services and audience from the business context, and never add products, places or claims that are not listed there. If the business context has no industry or services, keep the image to the topic and avoid making up a specific industry.
+Image/video rules: brand-safe, minimal or no text (models garble text), no real identifiable people, no logos or watermarks. The image must be about what this business actually does: use its industry, services and audience from the business context, and never add products, places or claims that are not listed there. If the business context has no industry or services, keep the image to the topic and avoid making up a specific industry.
 
 Respond with ONLY valid JSON: {"topic": string, "hook": string, "caption": string, "hashtags": string[], "imagePrompt": string, "storyImagePrompt": string, "videoPrompt": string}`;
 
