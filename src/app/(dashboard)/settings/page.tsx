@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import IntegrationsPanel from "@/components/integrations-panel";
 import CalendlySettings from "@/components/calendly-settings";
 import VoiceNumberPanel from "@/components/voice-number-panel";
+import SendingScheduleSettings from "@/components/sending-schedule-settings";
 
 interface SocialConnection {
   id: string;
@@ -213,6 +214,14 @@ export default async function SettingsPage(props: {
         <div className="mt-3">
           <VoiceNumberPanel initialNumber={voiceNumber?.twilio_number ?? null} initialStatus={voiceNumber?.status ?? null} />
         </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-semibold">Sending Schedule</h2>
+        <p className="mt-1 text-sm text-zinc-500">
+          Timezone, daily sending window, and follow-up cadence for automated outreach.
+        </p>
+        <SendingScheduleSettings />
       </section>
 
       <section>
