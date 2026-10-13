@@ -12,9 +12,10 @@ interface EditModalProps {
 function EditModal({ post, onClose, onSaved }: EditModalProps) {
   const [caption, setCaption] = useState(post.caption ?? post.topic ?? "");
   const [saving, setSaving] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function save() {
+  async function saveOnly() {
     setSaving(true);
     setError(null);
     try {
@@ -31,6 +32,44 @@ function EditModal({ post, onClose, onSaved }: EditModalProps) {
       setError((e as Error).message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveAndPublish() {
+    setPublishing(true);
+    setError(null);
+    try {
+      // First update caption
+      const patchRes = await fetch(`/api/social/posts/${post.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ caption }),
+      });
+      const patchData = await patchRes.json();
+      if (!patchRes.ok) throw new Error(patchData.error || "Save failed");
+
+      // Then publish
+      const pubRes = await fetch("/api/social/posts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          platform: post.platform,
+          content_type: post.content_type,
+          caption,
+          media_url: post.media_url,
+          publish_now: true,
+          existing_post_id: post.id,
+        }),
+      });
+      const pubData = await pubRes.json();
+      if (!pubRes.ok) throw new Error(pubData.error || "Publish failed");
+
+      onSaved({ ...post, caption, status: "published" });
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setPublishing(false);
     }
   }
 
@@ -64,11 +103,18 @@ function EditModal({ post, onClose, onSaved }: EditModalProps) {
               Cancel
             </button>
             <button
-              onClick={save}
-              disabled={saving}
+              onClick={saveOnly}
+              disabled={saving || publishing}
+              className="rounded-md border border-black/[.1] px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-50 dark:border-white/[.145] dark:hover:bg-zinc-800"
+            >
+              {saving ? "Saving…" : "Save draft"}
+            </button>
+            <button
+              onClick={saveAndPublish}
+              disabled={saving || publishing}
               className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
             >
-              {saving ? "Saving…" : "Save"}
+              {publishing ? "Publishing…" : "Save & Publish"}
             </button>
           </div>
         </div>

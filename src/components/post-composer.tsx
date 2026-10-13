@@ -34,7 +34,7 @@ export default function PostComposer({ platforms }: { platforms: string[] }) {
   const [urls, setUrls] = useState<string[]>([]);
   const [urlDraft, setUrlDraft] = useState("");
   const [uploads, setUploads] = useState<Upload[]>([]);
-  const [mode, setMode] = useState<"now" | "schedule" | "draft">("draft");
+  const [mode, setMode] = useState<"now" | "schedule" | "draft">("now");
   const [scheduledFor, setScheduledFor] = useState("");
   const [busy, setBusy] = useState(false);
   const [generating, setGenerating] = useState(false);
