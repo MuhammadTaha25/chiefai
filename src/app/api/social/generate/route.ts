@@ -77,6 +77,13 @@ export async function POST(req: NextRequest) {
       contentPreference: settings?.content_preference ?? undefined,
       postsPerWeek: settings?.posts_per_week ?? undefined,
       extraInstruction: instruction,
+      // Pass structured preferences explicitly so they appear in their own
+      // dedicated block in the prompt — more reliable than burying them in
+      // the business context prose where the model might miss them.
+      brandLanguage: ctx.language,
+      callToAction: ctx.ctaPhrase ?? ctx.primaryCta,
+      contentPillars: ctx.contentPillars?.join(", "),
+      mustNotSay: ctx.mustNotSay,
     });
 
     if (!idea.caption && !idea.imagePrompt) {

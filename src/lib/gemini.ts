@@ -363,28 +363,47 @@ Respond with ONLY valid JSON matching exactly: {"topic": string}`;
  * Follow-up nudge for a lead who hasn't replied yet — references that this
  * is a follow-up (not a first touch) without being annoying about it.
  */
+// Each follow-up uses a different angle so the sequence never feels copy-pasted.
+const FOLLOW_UP_ANGLES: Record<number, string> = {
+  1: "Open with a very brief, specific observation about their industry or role — one sentence that shows you did your homework. Then ask a single, easy yes/no question about whether the problem exists for them.",
+  2: "Lead with a concrete, real-world outcome or use-case from a business similar to theirs (use ONLY what the business context says; if there is no proof, skip it and share a brief 'what-if' framing instead). Keep it to 2 sentences + 1 question.",
+  3: "Try a completely different angle: ask about their current process or challenge rather than pitching. One genuine question — no sales language.",
+  4: "Very short 'closing the loop' note — say you don't want to keep emailing if it's not relevant, and ask if now is a bad time or if it would be better to reconnect later.",
+  5: "Mention one specific thing that recently changed in their industry (use only what is in the business context; if nothing specific, mention that you're expanding in their space) and tie it to why you're reaching out.",
+};
+
 export async function draftFollowUpEmail(params: {
   sellingDescription: string;
   senderCompany: string;
   leadName: string;
   leadCompany: string;
+  leadTitle?: string | null;
+  leadIndustry?: string | null;
   followUpNumber: number;
   tone?: string;
   businessContext?: string;
 }): Promise<AidaEmail> {
-  const prompt = `${params.businessContext ? params.businessContext + "\n\n" : ""}You are an expert cold-email copywriter. Write a SHORT follow-up email (this is follow-up #${params.followUpNumber} — they haven't replied to earlier emails) for ${params.senderCompany}, who sells:
+  const angle = FOLLOW_UP_ANGLES[params.followUpNumber] ?? FOLLOW_UP_ANGLES[4];
+  const prompt = `${params.businessContext ? params.businessContext + "\n\n" : ""}You are an expert cold-email copywriter. Write follow-up #${params.followUpNumber} for ${params.senderCompany}.
+
+What we sell:
 """
 ${untrusted(params.sellingDescription)}
 """
 
-Recipient: ${untrusted(params.leadName,200)} at ${untrusted(params.leadCompany,200)}.
+Recipient: ${untrusted(params.leadName, 200)} (${params.leadTitle ? untrusted(params.leadTitle, 100) : "unknown title"}) at ${untrusted(params.leadCompany, 200)}${params.leadIndustry ? `, industry: ${untrusted(params.leadIndustry, 100)}` : ""}.
 Tone: ${params.tone ?? "professional, warm, concise"}.
 
-Rules:
-- Under 60 words — follow-ups should be shorter than the first email.
-- Don't repeat the full pitch — add one new angle, a question, or a light nudge.
-- No guilt-tripping ("just following up" as filler) — get to the point.
-- Plain text only, no markdown.
+ANGLE FOR THIS FOLLOW-UP (follow this exactly — this is what differentiates it from earlier emails in the sequence):
+${angle}
+
+Hard rules:
+- Under 65 words total. Follow-ups must be shorter than the first email.
+- Never start with "Just following up", "I wanted to", "I hope", or "I'm checking in".
+- No guilt-tripping. No fake urgency. No hype words.
+- No links, no markdown, plain text only.
+- Subject line: short (under 45 characters), conversational, references the company or their role — NOT a re-use of the first email's subject.
+- Do not invent facts, stats, testimonials or results not in the business context.
 
 Respond with ONLY valid JSON matching exactly: {"subject": string, "body": string}`;
 
@@ -812,23 +831,51 @@ export async function generateSocialContent(params: {
   companyName: string;
   kind: "post" | "story";
   businessContext?: string;
+  /**
+   * Optional structured preferences from the client's social wizard — brand
+   * voice, language, CTA, must-NOT-say list, content pillars. Pass everything
+   * the wizard stored so the output is business-specific, not generic.
+   */
+  contentPreference?: string;
+  brandLanguage?: string;
+  callToAction?: string;
+  mustNotSay?: string;
 }): Promise<SocialContentDraft> {
   const isStory = params.kind === "story";
-  const planPrompt = `${params.businessContext ? params.businessContext + "\n\n" : ""}You are ${params.companyName}'s social media manager. Create ONE ${isStory ? "story" : "feed post"} for today.
+
+  // Compose a preferences block that only renders lines the wizard actually
+  // filled in — a missing preference is better than the model seeing "none".
+  const prefLines: string[] = [];
+  if (params.brandLanguage) prefLines.push(`Language / locale: ${params.brandLanguage} — write the caption in this language.`);
+  if (params.contentPreference) prefLines.push(`Content voice & pillars: ${params.contentPreference}`);
+  if (params.callToAction) prefLines.push(`Call to action to use: ${params.callToAction}`);
+  if (params.mustNotSay) prefLines.push(`Must NOT say or imply: ${params.mustNotSay}`);
+  const prefsBlock = prefLines.length
+    ? `\nCLIENT PREFERENCES (set in their social wizard — follow them exactly):\n${prefLines.join("\n")}\n`
+    : "";
+
+  const planPrompt = `${params.businessContext ? params.businessContext + "\n\n" : ""}You are ${params.companyName}'s social media manager. Create ONE ${isStory ? "story" : "feed post"} for today that reflects the business ABOVE — its specific services, industry, audience and brand voice.${prefsBlock}
 
 ${isStory
-  ? "This is a STORY: write ONLY a detailed image-generation prompt for a vertical 9:16 image (no caption, no text to overlay)."
-  : "This is a FEED POST: write a short, engaging caption (under 150 characters, at most 1-2 relevant hashtags, no emojis unless clearly on-brand) AND a detailed image-generation prompt for a square 1:1 image."}
+    ? "This is a STORY: write ONLY a detailed image-generation prompt for a vertical 9:16 image that shows a real scene from this business's world (its services, its customers, its environment). No generic stock-photo concepts — the scene must be specific to what this company does."
+    : `This is a FEED POST:
+- Caption: under 150 characters, naturally written in ${params.brandLanguage ?? "the language of the target market"}. Engaging, specific to this business — NOT generic tips or motivational filler. At most 2 relevant industry hashtags. No fake urgency, no clickbait.${params.callToAction ? ` End with or include this CTA: "${params.callToAction}"` : ""}
+- Image prompt: a detailed scene-based prompt for a square 1:1 image. The scene MUST be specific to what this company actually does — show the real environment, the kinds of customers, or the outcome the service delivers. NOT a generic office, NOT abstract shapes, NOT a stock handshake. Photorealistic, natural lighting.`}
 
-Image rules: clean, brand-safe, minimal text (image models garble small text), no photos of real people, no logos or watermarks.
+Image rules (applies to BOTH post and story): brand-safe, minimal or no text (image models garble text), no photos of real identifiable people, no logos or watermarks, no robot or AI clichés (no circuit boards, no glowing brains).
 
 Respond with ONLY valid JSON matching exactly: {"caption": string, "imagePrompt": string}`;
 
   const plan = await generateJson<{ caption: string; imagePrompt: string }>(planPrompt);
-  const image = await generateSocialImage(
-    (plan.imagePrompt || plan.caption || `${params.companyName} abstract brand graphic`).slice(0, 1200),
-    isStory ? "9:16" : "1:1"
-  );
+
+  // Enrich the image prompt with the business context so the rendering call
+  // is grounded even if the text model wrote a vague prompt.
+  const enrichedImagePrompt = (
+    (plan.imagePrompt || plan.caption || `${params.companyName} professional business scene`) +
+    (params.businessContext ? ` [Business context for grounding: ${params.businessContext.slice(0, 400)}]` : "")
+  ).slice(0, 1500);
+
+  const image = await generateSocialImage(enrichedImagePrompt, isStory ? "9:16" : "1:1");
   return {
     caption: isStory ? "" : plan.caption || "",
     imageBase64: image.base64,
@@ -866,22 +913,45 @@ export async function generateSocialPostIdea(params: {
   contentPreference?: string;
   postsPerWeek?: number;
   extraInstruction?: string;
+  /** Brand language / locale (e.g. "Urdu", "English UK") from the social wizard. */
+  brandLanguage?: string;
+  /** Call to action phrase from the wizard (e.g. "Book a free call", "DM us now"). */
+  callToAction?: string;
+  /** A comma-separated list of topics/services the wizard said to focus on. */
+  contentPillars?: string;
+  /** Words/phrases the business said must never appear. */
+  mustNotSay?: string;
 }): Promise<SocialPostIdea> {
   const { companyName, platform, kind, businessContext, contentPreference, postsPerWeek } = params;
   const isStory = kind === "story";
   const isCarousel = kind === "carousel";
 
-  const prompt = `${businessContext ? businessContext + "\n\n" : ""}You are ${companyName}'s social media manager. Create ONE ${platform} ${isStory ? "story" : "feed post"}.
-Content preference on file: ${contentPreference ?? "unspecified"}${postsPerWeek ? ` (about ${postsPerWeek} posts per week)` : ""}.
-Format for this one: ${kind}${isCarousel ? " — write the caption as a short multi-slide narrative" : ""}.
+  // Build a focused preferences block so the model always sees what the client
+  // actually configured — empty fields are omitted rather than printed as "none".
+  const prefLines: string[] = [];
+  if (params.brandLanguage) prefLines.push(`Language / locale: ${params.brandLanguage} — write the caption in this language only.`);
+  if (params.contentPillars) prefLines.push(`Content pillars / topics this week: ${params.contentPillars}`);
+  if (contentPreference) prefLines.push(`Voice & style: ${contentPreference}`);
+  if (params.callToAction) prefLines.push(`Call to action: ${params.callToAction}`);
+  if (params.mustNotSay) prefLines.push(`Must NOT say or imply: ${params.mustNotSay}`);
+  if (postsPerWeek) prefLines.push(`Posting frequency context: about ${postsPerWeek} posts per week.`);
+  const prefsBlock = prefLines.length
+    ? `\nCLIENT PREFERENCES (set in their social wizard — follow them exactly):\n${prefLines.join("\n")}\n`
+    : "";
+
+  const prompt = `${businessContext ? businessContext + "\n\n" : ""}You are ${companyName}'s social media manager. Create ONE ${platform} ${isStory ? "story" : "feed post"} that is SPECIFIC to this business — its actual services, its real customers, its industry language and its brand voice.${prefsBlock}
+Format for this one: ${kind}${isCarousel ? " — write the caption as a short multi-slide narrative (each slide idea separated by ' | ')" : ""}.
 
 Write:
-- a scroll-stopping caption under 150 characters, naturally written, no clickbait and no fake urgency${isStory ? " (this is a story, so keep it even shorter)" : ""}
-- 8 to 12 RELEVANT hashtags for this niche and market (WITHOUT the # symbol), mixing broad and niche tags — no generic spam like #follow4follow
-- a detailed image-generation prompt for a ${isStory ? "vertical 9:16" : "square 1:1"} image that suits the post
+- Caption: scroll-stopping, under 150 characters, naturally written in ${params.brandLanguage ?? "the language of the target market"}. No clickbait, no fake urgency.${params.callToAction ? ` End with or work in this CTA: "${params.callToAction}"` : ""} The post must feel like it came from this SPECIFIC business — not a generic brand or a template.${isStory ? " (this is a story, keep the text even shorter or rely on the visual)" : ""}
+- Hashtags: 8 to 12 RELEVANT hashtags for THIS specific niche and market (WITHOUT the # symbol), mixing broad discovery tags with niche/industry-specific tags — no generic spam like #follow4follow, no invented brand hashtags. The hashtags must match the language and market of this business.
+- imagePrompt: a DETAILED, scene-specific prompt for a ${isStory ? "vertical 9:16" : "square 1:1"} image. The scene MUST be grounded in what this business actually does — show the real service being delivered, a real outcome the customer experiences, the team at work, or the client's actual environment. NOT a generic office shot. NOT abstract shapes. NOT an "AI" cliché (no robots, circuit boards, glowing brains). Photorealistic, natural lighting. If the business sells a digital or professional service, show the human side of it — the customer's relief, the conversation, the result in their life.
 
-Image rules: clean, brand-safe, minimal or no text (image models garble small text), no photos of real identifiable people, no logos or watermarks.
-${params.extraInstruction ? `\nExtra instruction from the user: ${params.extraInstruction}\n` : ""}
+Hard rules for ALL parts:
+- Only use facts stated in the business context — never invent prices, guarantees, statistics or services.
+- Brand-safe, minimal or no text in the image (image models garble small text).
+- No real identifiable people's likenesses. No logos or watermarks.
+${params.mustNotSay ? `- Never say or imply: ${params.mustNotSay}\n` : ""}${params.extraInstruction ? `\nExtra instruction from the user: ${params.extraInstruction}\n` : ""}
 Respond with ONLY valid JSON: {"caption": string, "hashtags": string[], "imagePrompt": string}`;
 
   const plan = await generateJson<{ caption?: string; hashtags?: unknown; imagePrompt?: string }>(prompt);
