@@ -3,6 +3,7 @@ import { getClientBusinessContext, formatBusinessContext } from "@/lib/business-
 import { createAdminClient } from "@/lib/supabase/admin";
 import { FORM_LEAD_SOURCE, autoSendSince } from "@/lib/campaign";
 import { draftOfferPhrases, draftAidaEmail } from "@/lib/gemini";
+import { fetchCompanyDescription } from "@/lib/explorium";
 import { bareDomain, buildTemplateEmail } from "@/lib/outreach-template";
 import { renderCustomTemplate } from "@/lib/custom-template";
 import { cleanOutreachEmail, lintOutreachEmail } from "@/lib/email-quality";
@@ -252,6 +253,17 @@ export async function sendBatchForClient(clientId: string) {
       );
       let draft = fixedDraft;
       try {
+        // Fetch company description from Explorium for richer personalisation.
+        // Runs in parallel with nothing else — failure silently returns null
+        // and we fall back to the plain businessContext already set above.
+        const companyDesc = await fetchCompanyDescription({
+          companyName: lead.company || "",
+          companyDomain: null,
+        });
+        const enrichedContext = companyDesc
+          ? `${businessContext ? businessContext + "\n\n" : ""}ABOUT THE LEAD'S COMPANY:\n${companyDesc}`
+          : businessContext;
+
         const aidaDraft = cleanOutreachEmail(
           await draftAidaEmail({
             sellingDescription,
@@ -259,7 +271,7 @@ export async function sendBatchForClient(clientId: string) {
             leadName: isBusinessLead ? (lead.company || "there") : (lead.name || "there"),
             leadCompany: lead.company || "your company",
             leadTitle: isBusinessLead ? null : (lead.job_title ?? null),
-            businessContext,
+            businessContext: enrichedContext,
           })
         );
         // Only use the AIDA draft if it passes all deliverability checks; otherwise keep the fixed template.

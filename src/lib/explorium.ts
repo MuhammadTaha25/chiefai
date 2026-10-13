@@ -163,3 +163,73 @@ export async function findProspects(query: ProspectQuery): Promise<ProspectResul
 
   return prospects;
 }
+
+/**
+ * Fetch a short company description from Explorium for use in personalising
+ * cold emails. Returns null when the API key is not configured, the company
+ * cannot be matched, or any error occurs — callers should fall back to the
+ * AIDA draft without enrichment rather than failing the send.
+ *
+ * We use the /v2/businesses/match endpoint (name + optional domain) and then
+ * pull firmographics for the best match. The description is truncated to ~400
+ * characters so the AI prompt stays focused.
+ */
+export async function fetchCompanyDescription(params: {
+  companyName: string;
+  companyDomain?: string | null;
+}): Promise<string | null> {
+  if (!EXPLORIUM_API_KEY) return null;
+
+  try {
+    // Step 1: match business_id by name/domain.
+    const matchRes = await fetch(`${EXPLORIUM_BASE_URL}/businesses/match`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", api_key: EXPLORIUM_API_KEY },
+      body: JSON.stringify({
+        businesses: [
+          { name: params.companyName, ...(params.companyDomain ? { domain: params.companyDomain } : {}) },
+        ],
+      }),
+    });
+    if (!matchRes.ok) return null;
+    const matchPayload = await matchRes.json() as unknown;
+    // Response shape: { results: [{ business_id, name, ... }] }
+    const results = isPlainObject(matchPayload)
+      ? ((matchPayload.results ?? matchPayload.data ?? matchPayload.businesses) as unknown[])
+      : null;
+    if (!Array.isArray(results) || results.length === 0) return null;
+    const first = results[0];
+    if (!isPlainObject(first)) return null;
+    const businessId = first.business_id ?? first.id;
+    if (typeof businessId !== "string") return null;
+
+    // Step 2: enrich firmographics for that business_id.
+    const enrichRes = await fetch(`${EXPLORIUM_BASE_URL}/businesses/enrich`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", api_key: EXPLORIUM_API_KEY },
+      body: JSON.stringify({
+        business_ids: [businessId],
+        enrichments: ["firmographics"],
+      }),
+    });
+    if (!enrichRes.ok) return null;
+    const enrichPayload = await enrichRes.json() as unknown;
+    const enrichRows = extractRows(enrichPayload);
+    if (enrichRows.length === 0) return null;
+    const row = enrichRows[0];
+    if (!isPlainObject(row)) return null;
+
+    const desc =
+      row.business_description ??
+      row.firmo_business_description ??
+      row.description ??
+      row.about ??
+      null;
+    if (typeof desc !== "string" || !desc.trim()) return null;
+
+    // Return first ~400 chars (roughly 2-3 sentences) — enough context for AIDA.
+    return desc.trim().slice(0, 400);
+  } catch {
+    return null;
+  }
+}
