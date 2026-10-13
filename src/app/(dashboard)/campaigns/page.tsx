@@ -1,4 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { getCurrentClient } from "@/lib/get-current-client";
 import CampaignPanel from "@/components/campaign-panel";
 
 interface Campaign {
@@ -22,6 +24,28 @@ function currentCampaignMonth(): string {
 
 export default async function CampaignsPage() {
   const supabase = await createClient();
+  const { client } = await getCurrentClient();
+  const admin = createAdminClient();
+
+  // Fetch auto-send readiness: mailbox, timezone, and template mode.
+  const [{ data: mailboxRow }, { data: clientRow }] = await Promise.all([
+    client
+      ? admin.from("mailboxes").select("id").eq("client_id", client.id).limit(1).maybeSingle<{ id: string }>()
+      : Promise.resolve({ data: null }),
+    client
+      ? admin
+          .from("clients")
+          .select("timezone, outreach_template_subject, outreach_template_body")
+          .eq("id", client.id)
+          .maybeSingle<{ timezone: string | null; outreach_template_subject: string | null; outreach_template_body: string | null }>()
+      : Promise.resolve({ data: null }),
+  ]);
+
+  const hasMailbox = !!mailboxRow;
+  const hasTimezone = !!clientRow?.timezone;
+  const templateMode: "custom" | "ai" =
+    clientRow?.outreach_template_subject && clientRow?.outreach_template_body ? "custom" : "ai";
+  const autoSendReady = hasMailbox && hasTimezone;
 
   const campaignMonth = currentCampaignMonth();
 
@@ -47,6 +71,61 @@ export default async function CampaignsPage() {
           One monthly outreach cycle — fresh leads from Vibe Prospecting, deduplicated against everyone you&apos;ve
           already contacted, sent gradually with a daily limit.
         </p>
+      </div>
+
+      {/* Auto-send status banner */}
+      <div className={`rounded-xl border px-4 py-3 text-sm flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-4 ${
+        autoSendReady
+          ? "border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/40"
+          : "border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40"
+      }`}>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className={`text-base ${autoSendReady ? "text-green-600 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}`}>
+            {autoSendReady ? "✅" : "⚠️"}
+          </span>
+          <span className={`font-semibold ${autoSendReady ? "text-green-800 dark:text-green-300" : "text-amber-800 dark:text-amber-300"}`}>
+            {autoSendReady ? "Auto-send active" : "Auto-send not ready"}
+          </span>
+        </div>
+        <div className="text-zinc-600 dark:text-zinc-400 space-y-1">
+          {autoSendReady ? (
+            <>
+              <p>
+                Emails are sent automatically every day during your sending window.{" "}
+                <span className="font-medium">
+                  Template: {templateMode === "custom" ? "Your custom template" : "ChiefAI AI writes each email"}
+                </span>
+              </p>
+              <p className="text-xs text-zinc-500">
+                To change your email template, go to{" "}
+                <a href="/campaigns/template" className="underline hover:text-zinc-700">
+                  Campaigns → Template
+                </a>{" "}
+                or update it on the{" "}
+                <a href="/settings" className="underline hover:text-zinc-700">Settings</a> page.
+              </p>
+            </>
+          ) : (
+            <ul className="space-y-0.5 list-none">
+              {!hasMailbox && (
+                <li>
+                  • No verified mailbox —{" "}
+                  <a href="/domains" className="underline hover:text-amber-800 dark:hover:text-amber-200">
+                    add one under Domains
+                  </a>
+                </li>
+              )}
+              {!hasTimezone && (
+                <li>
+                  • Sending timezone not set —{" "}
+                  <a href="/settings" className="underline hover:text-amber-800 dark:hover:text-amber-200">
+                    set it in Settings
+                  </a>
+                </li>
+              )}
+            </ul>
+          )}
+        </div>
       </div>
 
       <CampaignPanel campaign={currentCampaign ?? null} />

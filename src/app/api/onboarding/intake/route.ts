@@ -45,6 +45,18 @@ export async function POST(req: NextRequest) {
   if (has("icpMaxEmployees")) fields.icp_max_employees = num(body.icpMaxEmployees);
   if (has("icpLocation")) fields.icp_location = str(body.icpLocation);
 
+  // Email template preference set during onboarding: if the user provided a
+  // custom template, save it. If they chose AI mode (templateSubject/Body absent
+  // or empty), leave the columns NULL — the batch and draft routes treat NULL as
+  // "let AI write it". This means re-submitting onboarding without a template
+  // never wipes a template the user saved later on the Campaigns page.
+  const templateSubject = str(body.templateSubject, 80);
+  const templateBody = str(body.templateBody, 2000);
+  if (templateSubject && templateBody) {
+    fields.outreach_template_subject = templateSubject;
+    fields.outreach_template_body = templateBody;
+  }
+
   let clientId = existing?.id;
   if (clientId) {
     const { error } = await admin.from("clients").update(fields).eq("id", clientId);
