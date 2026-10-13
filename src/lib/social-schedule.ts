@@ -111,9 +111,28 @@ export function weeklyItems(input: ScheduleInput): PlannedItem[] {
   return items;
 }
 
-/** Items of `kind` planned for today whose time has already arrived (the caller skips ones it already generated). */
-export function dueItems(input: ScheduleInput, local: { weekday: number; minutes: number }, kind: "post" | "story"): PlannedItem[] {
-  return weeklyItems(input).filter((it) => it.kind === kind && it.weekday === local.weekday && it.minutes <= local.minutes);
+/**
+ * Items of `kind` planned for today whose time has arrived.
+ *
+ * A slot is "due" when its scheduled minutes ≤ current minutes (i.e. the time
+ * has passed) AND it is within `windowMinutes` of its schedule (default 60).
+ * The window prevents a cron from firing a slot hours before its scheduled time
+ * because of a misconfigured or default fallback time — a 20:00 story must
+ * never fire at 17:30 even if the cron mis-computed its slot to 17:21.
+ */
+export function dueItems(
+  input: ScheduleInput,
+  local: { weekday: number; minutes: number },
+  kind: "post" | "story",
+  windowMinutes = 60,
+): PlannedItem[] {
+  return weeklyItems(input).filter(
+    (it) =>
+      it.kind === kind &&
+      it.weekday === local.weekday &&
+      it.minutes <= local.minutes &&
+      local.minutes - it.minutes <= windowMinutes,
+  );
 }
 
 /** Local weekday (Mon=0), minutes since midnight and ISO date in `timeZone`; `at` ("YYYY-MM-DDTHH:mm") overrides the clock for testing. */
@@ -222,8 +241,19 @@ export function planItems(plan: WeeklyPlan, postTime: string | null | undefined,
 }
 
 /** Feed posts and stories in a planned list that are due now (same rule as dueItems). */
-export function dueFromItems(items: PlannedItem[], local: { weekday: number; minutes: number }, kind: "post" | "story"): PlannedItem[] {
-  return items.filter((it) => it.kind === kind && it.weekday === local.weekday && it.minutes <= local.minutes);
+export function dueFromItems(
+  items: PlannedItem[],
+  local: { weekday: number; minutes: number },
+  kind: "post" | "story",
+  windowMinutes = 60,
+): PlannedItem[] {
+  return items.filter(
+    (it) =>
+      it.kind === kind &&
+      it.weekday === local.weekday &&
+      it.minutes <= local.minutes &&
+      local.minutes - it.minutes <= windowMinutes,
+  );
 }
 
 /** Counts per format, so the older count columns stay in step with the per-day plan. */

@@ -155,6 +155,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ type
     }
     const clock = localClock(tzPref, new Date(), at);
 
+    // Log schedule state so timing issues can be diagnosed from Vercel logs.
+    const allSlots = planned.filter((it) => it.kind === type && it.weekday === clock.weekday);
+    logEvent("social_content.schedule_check", {
+      client_id: clientId,
+      kind: type,
+      local_time: `${String(Math.floor(clock.minutes / 60)).padStart(2, "0")}:${String(clock.minutes % 60).padStart(2, "0")}`,
+      date: clock.date,
+      post_time: input.postTime,
+      story_time: input.storyTime,
+      use_weekly_plan: weeklyPlan ? true : false,
+      slots_today: allSlots.map((it) => `${String(Math.floor(it.minutes / 60)).padStart(2, "0")}:${String(it.minutes % 60).padStart(2, "0")}`).join(","),
+    });
+
     const due = weeklyPlan ? dueFromItems(planned, clock, type) : dueItems(input, clock, type);
     for (const item of due) {
       const key = slotKey(type, clock.date, item.slot);
