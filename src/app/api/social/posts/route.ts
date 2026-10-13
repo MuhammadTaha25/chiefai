@@ -293,6 +293,8 @@ export async function POST(req: NextRequest) {
         content_type: resolvedContentType(postType, media),
         zernio_post_id: providerId,
         published_at: publishNow ? new Date().toISOString() : null,
+        // Persist the scheduled time so the Content page can display it.
+        ...(scheduledFor ? { scheduled_for: scheduledFor } : {}),
       })
       .eq("id", row.id);
 
