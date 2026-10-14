@@ -91,7 +91,7 @@ export async function sendFeedbackRequest(
 
   // Generate feedback token
   const token = generateFeedbackToken();
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://infomistqa.vercel.app";
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://infomistqa4827.online";
   const formUrl = feedbackFormUrl(token, baseUrl);
 
   // Save token to booking
