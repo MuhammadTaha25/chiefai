@@ -77,11 +77,13 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
       .lte("next_follow_up_at", new Date().toISOString())
       .order("next_follow_up_at", { ascending: true });
 
-    // The scheduler applies the same rule as automatic first emails: only leads that came from the lead-gen form
-    // (and, when AUTO_SEND_LEADS_SINCE is set, were created after it) are followed up automatically, so turning
-    // this cron on never reaches back to older leads. A client running follow-ups by hand for their own leads is unaffected.
+    // Follow-ups apply to any lead that received an initial email — both AI-prospected leads and
+    // manually-added leads. The lead_source filter is intentionally NOT applied here: if a client
+    // added a lead manually and the initial email was sent (follow_up_number >= 1), the follow-up
+    // sequence should continue automatically.
+    // AUTO_SEND_LEADS_SINCE still applies to prevent the cron from reaching back to very old leads
+    // that were created before automation was switched on.
     if (isCron) {
-      q = q.eq("lead_source", FORM_LEAD_SOURCE);
       const since = autoSendSince();
       if (since) q = q.gte("created_at", since);
     }
@@ -218,8 +220,12 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
       const usable = await assertDomainUsableByClient(admin, lead.client_id, mailboxDomain, { requireExplicitOwnership: externalDomains.has(mailboxDomain) });
       if (!usable.usable || (await isDomainDisconnected(admin, lead.client_id, mailboxDomain))) {
         await releaseReservation(admin, reservation.reservationId);
-        await admin.from("leads").update({ next_follow_up_at: lead.next_follow_up_at }).eq("id", lead.id).is("next_follow_up_at", null);
-        results.push({ leadId: lead.id, result: "error", detail: `Domain ${mailboxDomain} is not usable (ownership unverified or disconnected) — follow-up blocked` });
+        // Back off 24 hours instead of restoring the original timestamp — this prevents stale domain
+        // failures from re-entering the queue every hour and starving other leads. Once per day is
+        // frequent enough to pick up automatically when the domain issue is resolved.
+        const retryAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        await admin.from("leads").update({ next_follow_up_at: retryAt }).eq("id", lead.id).is("next_follow_up_at", null);
+        results.push({ leadId: lead.id, result: "error", detail: `Domain ${mailboxDomain} is not usable (ownership unverified or disconnected) — follow-up blocked, will retry in 24h` });
         continue;
       }
 
