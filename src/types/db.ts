@@ -38,6 +38,8 @@ export interface Lead {
   campaign_id?: string | null;
   /** Joined from campaigns.campaign_month — not in the leads table itself. */
   campaign_month?: string | null;
+  /** Joined from campaigns.niche — not in the leads table itself. */
+  campaign_niche?: string | null;
   manually_stopped?: boolean | null;
   reply_classification?: string | null;
   id: string;

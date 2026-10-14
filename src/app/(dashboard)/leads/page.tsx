@@ -20,20 +20,21 @@ export default async function LeadsPage() {
       .select("lead_id, scheduled_at, booking_status")
       .order("created_at", { ascending: false })
       .returns<{ lead_id: string; scheduled_at: string | null; booking_status: string }[]>(),
-    // Campaign month labels — join to leads via campaign_id
+    // Campaign month + niche labels — join to leads via campaign_id
     supabase
       .from("campaigns")
-      .select("id, campaign_month")
-      .returns<{ id: string; campaign_month: string | null }[]>(),
+      .select("id, campaign_month, niche")
+      .returns<{ id: string; campaign_month: string | null; niche: string | null }[]>(),
   ]);
 
-  const campaignMonthById: Record<string, string | null> = {};
-  for (const c of campaignRows ?? []) campaignMonthById[c.id] = c.campaign_month;
+  const campaignById: Record<string, { campaign_month: string | null; niche: string | null }> = {};
+  for (const c of campaignRows ?? []) campaignById[c.id] = { campaign_month: c.campaign_month, niche: c.niche };
 
-  // Attach campaign_month to each lead for display
+  // Attach campaign_month + campaign_niche to each lead for display
   const leads: Lead[] = (leadsRaw ?? []).map((l) => ({
     ...l,
-    campaign_month: l.campaign_id ? (campaignMonthById[l.campaign_id] ?? null) : null,
+    campaign_month: l.campaign_id ? (campaignById[l.campaign_id]?.campaign_month ?? null) : null,
+    campaign_niche: l.campaign_id ? (campaignById[l.campaign_id]?.niche ?? null) : null,
   }));
 
   const bookings: Record<string, { scheduled_at: string | null; booking_status: string }> = {};
