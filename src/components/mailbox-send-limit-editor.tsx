@@ -10,13 +10,56 @@ interface Mailbox {
   created_at?: string | null;
 }
 
-function warmupInfo(m: Mailbox): string {
-  if (!m.created_at) return "Day 0";
+/** Mirror of warmup-schedule.ts — kept inline so no server import is needed in this client component. */
+function coldLimitForAge(ageDays: number): number {
+  return Math.min(30, Math.floor(4 + 46 * (1 - Math.exp(-ageDays / 18))));
+}
+
+function warmupInfo(m: Mailbox): { ageDays: number; warmupAllows: number } {
+  if (!m.created_at) return { ageDays: 0, warmupAllows: coldLimitForAge(0) };
   const ageDays = Math.max(
     0,
     Math.floor((Date.now() - new Date(m.created_at).getTime()) / 86400000)
   );
-  return `Day ${ageDays}`;
+  return { ageDays, warmupAllows: coldLimitForAge(ageDays) };
+}
+
+function WarmupLine({ mailbox, cap }: { mailbox: Mailbox; cap: number }) {
+  const { ageDays, warmupAllows } = warmupInfo(mailbox);
+  const fullyWarmed = warmupAllows >= 30;
+
+  if (cap <= 0) {
+    // No limit set — just show where warmup is at
+    return (
+      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+        Warmup: Day {ageDays} — curve allows{" "}
+        <span className="font-medium">{warmupAllows}/day</span>
+        {fullyWarmed ? " (fully warmed ✓)" : " — set a limit to start sending"}
+      </p>
+    );
+  }
+
+  // Warmup curve is the bottleneck while ageDays < ~21; once warmed, cap governs
+  const effectiveSends = Math.min(cap, warmupAllows);
+  const warming = warmupAllows < cap;
+
+  return (
+    <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+      Warmup: Day {ageDays} — curve allows{" "}
+      <span className="font-medium">{warmupAllows}/day</span>
+      {warming ? (
+        <>
+          {" "}— today will send{" "}
+          <span className="font-medium">{effectiveSends}</span> (cap of {cap} reached ~Day 21)
+        </>
+      ) : (
+        <>
+          {" "}— fully warmed ✓, sending up to{" "}
+          <span className="font-medium">{cap}/day</span>
+        </>
+      )}
+    </p>
+  );
 }
 
 export default function MailboxSendLimitEditor({ mailboxes }: { mailboxes: Mailbox[] }) {
@@ -65,7 +108,7 @@ export default function MailboxSendLimitEditor({ mailboxes }: { mailboxes: Mailb
         >
           <div className="flex flex-wrap items-center gap-3">
             <span className="flex-1 min-w-0 truncate font-medium">{m.address}</span>
-            <span className="text-xs text-zinc-400">{warmupInfo(m)}</span>
+            <span className="text-xs text-zinc-400">Day {warmupInfo(m).ageDays}</span>
             <div className="flex items-center gap-2">
               <label htmlFor={`limit-${m.id}`} className="text-xs text-zinc-500 shrink-0">
                 Daily limit
@@ -91,6 +134,8 @@ export default function MailboxSendLimitEditor({ mailboxes }: { mailboxes: Mailb
               </button>
             </div>
           </div>
+          {/* Warmup info line — shows what will actually send today */}
+          <WarmupLine mailbox={m} cap={limits[m.id] ?? 0} />
           {errors[m.id] && (
             <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errors[m.id]}</p>
           )}
