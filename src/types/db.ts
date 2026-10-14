@@ -35,6 +35,9 @@ export interface Lead {
   bounce_type?: "permanent" | "temporary" | null;
   bounce_retry_after?: string | null;
   complained?: boolean | null;
+  campaign_id?: string | null;
+  /** Joined from campaigns.campaign_month — not in the leads table itself. */
+  campaign_month?: string | null;
   manually_stopped?: boolean | null;
   reply_classification?: string | null;
   id: string;

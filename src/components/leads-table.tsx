@@ -262,7 +262,15 @@ This sends a real email.`)) return sendDraft(true);
                       {lead.lead_type === "inbound" ? "Inbound" : "Outbound"}
                     </span>
                   </td>
-                  <td className="px-4 py-3">{lead.lead_source || "—"}</td>
+                  <td className="px-4 py-3">
+                    <div>{lead.lead_source || "—"}</div>
+                    {lead.campaign_month && (
+                      <div className="mt-0.5 text-xs text-zinc-400 dark:text-zinc-500">
+                        Campaign:{" "}
+                        {new Date(lead.campaign_month).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" })}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-zinc-500">
                     {lead.last_contact_at ? new Date(lead.last_contact_at).toLocaleDateString() : "—"}
                   </td>
