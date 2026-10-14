@@ -16,6 +16,29 @@ import {
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
+/** 30-minute time slots for the whole day, e.g. "00:00", "00:30", …, "23:30". */
+const TIME_OPTIONS: { value: string; label: string }[] = Array.from({ length: 48 }, (_, i) => {
+  const h = Math.floor(i / 2);
+  const m = i % 2 === 0 ? "00" : "30";
+  const hh = String(h).padStart(2, "0");
+  const ampm = h < 12 ? "AM" : "PM";
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return { value: `${hh}:${m}`, label: `${h12}:${m} ${ampm}` };
+});
+
+/**
+ * Snap an arbitrary "HH:MM" to the nearest valid 30-minute slot.
+ * Prevents old DB values like "15:21" from falling through the select options.
+ */
+function snapToSlot(hhmm: string): string {
+  const m = /^(\d{1,2}):(\d{2})/.exec((hhmm ?? "").trim());
+  if (!m) return TIME_OPTIONS[0].value;
+  const h = Math.min(23, Number(m[1]));
+  const min = Number(m[2]) < 15 ? 0 : Number(m[2]) < 45 ? 30 : 0;
+  const hAdj = min === 0 && Number(m[2]) >= 45 ? Math.min(23, h + 1) : h;
+  return `${String(hAdj).padStart(2, "0")}:${min === 0 ? "00" : "30"}`;
+}
+
 const FORMAT_LABEL: Record<PostFormat, string> = {
   none: "Rest",
   image: "Image",
@@ -117,8 +140,8 @@ export default function AutomationWizard({
   const [leadDetection, setLeadDetection] = useState(existing?.lead_detection_enabled ?? true);
   const [analyticsEnabled, setAnalyticsEnabled] = useState(existing?.analytics_enabled ?? true);
 
-  const [postTime, setPostTime] = useState(existing?.post_time ?? RECOMMENDED_PLAN.postTime);
-  const [storyTime, setStoryTime] = useState(existing?.story_time ?? RECOMMENDED_PLAN.storyTime);
+  const [postTime, setPostTime] = useState(() => snapToSlot(existing?.post_time ?? RECOMMENDED_PLAN.postTime));
+  const [storyTime, setStoryTime] = useState(() => snapToSlot(existing?.story_time ?? RECOMMENDED_PLAN.storyTime));
   const [timezone, setTimezone] = useState(existing?.timezone ?? "");
   const [planChoice, setPlanChoice] = useState<PlanChoice>(existing ? "custom" : "recommended");
   const [loading, setLoading] = useState(false);
@@ -272,27 +295,33 @@ export default function AutomationWizard({
             <div className="mt-2 grid grid-cols-2 gap-3">
               <label className="type-caption text-ink-secondary">
                 Post time
-                <input
-                  type="time"
+                <select
                   value={postTime}
                   onChange={(e) => {
                     setPlanChoice("custom");
                     setPostTime(e.target.value);
                   }}
                   className="mt-1 w-full rounded-md border border-strong bg-raised px-3 py-2 type-body text-ink"
-                />
+                >
+                  {TIME_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
               </label>
               <label className="type-caption text-ink-secondary">
                 Story time
-                <input
-                  type="time"
+                <select
                   value={storyTime}
                   onChange={(e) => {
                     setPlanChoice("custom");
                     setStoryTime(e.target.value);
                   }}
                   className="mt-1 w-full rounded-md border border-strong bg-raised px-3 py-2 type-body text-ink"
-                />
+                >
+                  {TIME_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
               </label>
             </div>
             <label className="mt-3 block type-caption text-ink-secondary">
