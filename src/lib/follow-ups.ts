@@ -45,44 +45,90 @@ interface DueLead {
   next_follow_up_at: string | null;
 }
 
+// Max leads processed per client per cron run — caps one client's share so a
+// backlog of failing leads for one tenant cannot starve other tenants.
+const MAX_LEADS_PER_CLIENT = 5;
+
 /**
  * One follow-up batch: picks up leads whose next_follow_up_at has passed, drafts a short follow-up, sends it
  * through a ready mailbox with capacity, and reschedules the next one (or stops at the client's cap). Shared by
  * the cron/manual route and by tests; `isCron` applies the automation-only lead rules.
+ *
+ * Multi-tenant fairness: in cron mode the batch is built per-client (round-robin style) so one
+ * client's stale/failing leads cannot block other tenants from being processed.
  */
 export async function runFollowUpBatch(opts: { clientIdFilter: string | null; isCron: boolean }) {
   const { clientIdFilter, isCron } = opts;
   const admin = createAdminClient();
 
-  let query = admin
-    .from("leads")
-    .select("id, client_id, campaign_id, name, company, email, follow_up_number, next_follow_up_at")
-    .gte("follow_up_number", 1) // only a lead whose initial email was actually sent can get a follow-up
-    .eq("reply_received", false)
-    .eq("unsubscribed", false)
-    .eq("email_bounced", false)
-    .eq("booked", false)
-    .eq("complained", false)
-    .eq("manually_stopped", false)
-    .not("email", "is", null)
-    .lte("next_follow_up_at", new Date().toISOString())
-    .order("next_follow_up_at", { ascending: true })
-    .limit(25); // bound one run (each lead = Gemini + Mailgun); the remainder is picked up next hour
+  // Base filter shared by all queries in this function.
+  function baseQuery() {
+    let q = admin
+      .from("leads")
+      .select("id, client_id, campaign_id, name, company, email, follow_up_number, next_follow_up_at")
+      .gte("follow_up_number", 1) // only a lead whose initial email was actually sent can get a follow-up
+      .eq("reply_received", false)
+      .eq("unsubscribed", false)
+      .eq("email_bounced", false)
+      .eq("booked", false)
+      .eq("complained", false)
+      .eq("manually_stopped", false)
+      .not("email", "is", null)
+      .lte("next_follow_up_at", new Date().toISOString())
+      .order("next_follow_up_at", { ascending: true });
 
-  if (clientIdFilter) query = query.eq("client_id", clientIdFilter);
+    // The scheduler applies the same rule as automatic first emails: only leads that came from the lead-gen form
+    // (and, when AUTO_SEND_LEADS_SINCE is set, were created after it) are followed up automatically, so turning
+    // this cron on never reaches back to older leads. A client running follow-ups by hand for their own leads is unaffected.
+    if (isCron) {
+      q = q.eq("lead_source", FORM_LEAD_SOURCE);
+      const since = autoSendSince();
+      if (since) q = q.gte("created_at", since);
+    }
 
-  // The scheduler applies the same rule as automatic first emails: only leads that came from the lead-gen form
-  // (and, when AUTO_SEND_LEADS_SINCE is set, were created after it) are followed up automatically, so turning
-  // this cron on never reaches back to older leads. A client running follow-ups by hand for their own leads is unaffected.
-  if (isCron) {
-    query = query.eq("lead_source", FORM_LEAD_SOURCE);
-    const since = autoSendSince();
-    if (since) query = query.gte("created_at", since);
+    return q;
   }
 
-  const { data: dueLeads, error: leadsError } = await query.returns<DueLead[]>();
-  if (leadsError) {
-    return { ok: false as const, error: leadsError.message, results: [] as FollowUpResult[] };
+  let dueLeads: DueLead[];
+
+  if (clientIdFilter) {
+    // Manual/session-auth run: single client, up to 25 leads, no fairness concern.
+    const { data, error } = await baseQuery()
+      .eq("client_id", clientIdFilter)
+      .limit(25)
+      .returns<DueLead[]>();
+    if (error) return { ok: false as const, error: error.message, results: [] as FollowUpResult[] };
+    dueLeads = data ?? [];
+  } else {
+    // Cron run: round-robin across clients so one tenant's failing leads cannot
+    // starve others. Fetch up to MAX_LEADS_PER_CLIENT per client in parallel.
+    const { data: clientRows, error: clientErr } = await admin
+      .from("leads")
+      .select("client_id")
+      .gte("follow_up_number", 1)
+      .eq("reply_received", false)
+      .eq("unsubscribed", false)
+      .eq("email_bounced", false)
+      .eq("booked", false)
+      .eq("complained", false)
+      .eq("manually_stopped", false)
+      .not("email", "is", null)
+      .lte("next_follow_up_at", new Date().toISOString());
+
+    if (clientErr) return { ok: false as const, error: clientErr.message, results: [] as FollowUpResult[] };
+
+    const clientIds = [...new Set((clientRows ?? []).map((r: { client_id: string }) => r.client_id))];
+
+    const perClientResults = await Promise.all(
+      clientIds.map((cid) =>
+        baseQuery()
+          .eq("client_id", cid)
+          .limit(MAX_LEADS_PER_CLIENT)
+          .returns<DueLead[]>()
+          .then(({ data }) => data ?? [])
+      )
+    );
+    dueLeads = perClientResults.flat();
   }
 
   const results: FollowUpResult[] = [];
