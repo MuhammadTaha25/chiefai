@@ -38,13 +38,14 @@ export function coldLimitForAge(ageDays: number): number {
  * damaging sender reputation. Pass `true` (or omit) when health is confirmed or
  * when there is not yet enough data to judge.
  *
- * The stored daily_send_limit is kept as a floor, so a tenant's configured
- * value never shrinks (no regression for mailboxes already past warm-up).
+ * During the warm-up period the warmup curve is a hard CEILING — a high
+ * daily_send_limit cannot bypass it. Once the mailbox has fully warmed up
+ * (scheduleLimit === WARMUP_CAP) the configured limit takes over as the cap,
+ * so operators can set a value above 30 for mature mailboxes if they choose.
  *
- * If daily_send_limit is null or 0 (not yet set by the operator), the mailbox still
- * contributes warmup-based capacity so the send system can work even when the UI
- * field hasn't been filled in.  The warmup curve itself IS the default limit in
- * that case.  Operators who need a hard cap must set daily_send_limit explicitly.
+ * If daily_send_limit is null or 0 (not yet set by the operator), the warmup
+ * curve is used directly — the mailbox still participates in sending even when
+ * the UI field hasn't been filled in.
  */
 export function effectiveDailyLimit(
   m: { daily_send_limit: number | null; created_at?: string | null },
@@ -58,13 +59,18 @@ export function effectiveDailyLimit(
 
   const base = Math.max(0, m.daily_send_limit ?? 0);
 
-  // No per-mailbox limit set → use the warmup curve directly (safe default).
+  // No per-mailbox limit set → warmup curve is the sole limit.
   if (base === 0) return scheduleLimit;
 
-  // Unhealthy mailbox: hold at current configured limit, no graduation.
-  if (!healthy) return base;
+  // Unhealthy mailbox: hold at the lower of the configured limit and the
+  // warmup curve — no graduation while reputation is damaged.
+  if (!healthy) return Math.min(base, scheduleLimit);
 
-  // Healthy mailbox: whichever is higher — the operator cap or the warmup schedule
-  // (so fully-warmed mailboxes honour a higher configured limit).
+  // During warm-up: warmup curve is a hard ceiling regardless of configured limit.
+  // Once fully warmed (scheduleLimit === WARMUP_CAP), honour the configured limit
+  // so operators can scale beyond 30 on mature mailboxes.
+  if (scheduleLimit < WARMUP_CAP) return Math.min(base, scheduleLimit);
+
+  // Fully warmed: configured limit wins (operator chose a higher cap).
   return Math.max(base, scheduleLimit);
 }
