@@ -30,6 +30,30 @@ export const MIN_GAP_MINUTES = 15;
 /** Lowest gap the planner will use to fit a daily total into the day. Below this, sends look like a burst. */
 export const FLOOR_GAP_MINUTES = 5;
 
+/**
+ * Jitter fraction applied to evenly-spaced send times. ±30% of the spacing interval
+ * is added so sends do not land on identical clock times every day (which ESPs notice).
+ * Clamped so the jittered minute stays inside [windowStart, windowEnd).
+ *
+ * Deterministic given a seed so tests can verify the output; in production pass
+ * Math.random() (the default).
+ */
+export const JITTER_FRACTION = 0.3;
+
+export function applyJitter(
+  minute: number,
+  spacingMinutes: number,
+  windowStart: number,
+  windowEnd: number,
+  rand = Math.random(),
+): number {
+  const maxShift = Math.floor(spacingMinutes * JITTER_FRACTION);
+  if (maxShift === 0) return minute;
+  // rand in [0,1) → shift in [-maxShift, +maxShift]
+  const shift = Math.round((rand * 2 - 1) * maxShift);
+  return Math.max(windowStart, Math.min(windowEnd - 1, minute + shift));
+}
+
 /** Recommended default: three windows with breaks in between (08-12, 14-16, 18-20). Client can change these. */
 export const RECOMMENDED_WINDOWS: SendWindow[] = [
   { startMin: 8 * 60, endMin: 12 * 60 },
@@ -83,7 +107,10 @@ export function planSendsForDay(opts: {
     const n = Math.min(windowCap, remaining.get(picked) ?? 0, total);
     if (n <= 0) continue;
     const spacing = length / n;
-    for (let k = 0; k < n; k++) out.push({ minute: w.startMin + Math.floor(k * spacing), mailboxId: picked });
+    for (let k = 0; k < n; k++) {
+      const base = w.startMin + Math.floor(k * spacing);
+      out.push({ minute: applyJitter(base, spacing, w.startMin, w.endMin), mailboxId: picked });
+    }
     remaining.set(picked, (remaining.get(picked) ?? 0) - n);
     total -= n;
   }

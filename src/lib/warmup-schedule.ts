@@ -1,32 +1,60 @@
 /**
  * Cold-email warm-up schedule. Day 0 = the mailbox was created. Every email is still cold outreach; the warm-up
- * is only about VOLUME: a new mailbox starts small and grows step by step, so it never looks like a spam blast.
- *  - days 0-6   (week 1): 5 per day
- *  - days 7-13  (week 2): 10 per day
- *  - days 14-20 (week 3): 15 per day
- *  - days 21-27 (week 4): 25 per day
- *  - day 28+:            WARMUP_CAP (30) per mailbox; add more mailboxes for more volume rather than raising the cap
+ * is only about VOLUME: a new mailbox starts small and ramps smoothly, so it never looks like a spam blast.
+ *
+ * EXPONENTIAL RAMP (replaces abrupt weekly jumps):
+ *   V(d) = min(WARMUP_CAP, floor(4 + 46 × (1 − e^(−d/18))))
+ *
+ *   d=0  →  4   d=7  →  ~16   d=14 →  ~25   d=21 →  ~29   d=28+ → 30
+ *
+ * The curve starts conservatively, accelerates through the critical first-two-weeks
+ * reputation-building period, then flattens near the cap — matching how ESPs
+ * (Google Postmaster, SNDS) actually build trust.
+ *
+ * HEALTH GATE: a mailbox whose bounce/complaint rate is above threshold is NOT
+ * auto-graduated even when age alone would allow it. The caller must check health
+ * separately (mailbox-health.ts → isMailboxHealthy) and pass `healthy`.
  *
  * Pure on purpose (no imports) so it can be tested without the app's path aliases.
  */
 export const WARMUP_CAP = 30;
 
+/**
+ * Max emails/day at age `ageDays` for a HEALTHY mailbox.
+ * Uses an exponential approach curve that avoids abrupt weekly jumps.
+ */
 export function coldLimitForAge(ageDays: number): number {
-  if (ageDays < 7) return 5;
-  if (ageDays < 14) return 10;
-  if (ageDays < 21) return 15;
-  if (ageDays < 28) return 25;
-  return WARMUP_CAP;
+  const d = Math.max(0, ageDays);
+  return Math.min(WARMUP_CAP, Math.floor(4 + 46 * (1 - Math.exp(-d / 18))));
 }
 
 /**
- * Today's cold-send limit for one mailbox. The stored daily_send_limit is kept as a floor, so a tenant's configured
- * value never shrinks (no regression for mailboxes already past warm-up); the schedule only controls how fast a NEW
- * mailbox ramps.
+ * Today's cold-send limit for one mailbox.
+ *
+ * `healthy` — pass `false` when the mailbox's recent bounce/complaint rate is
+ * above threshold (from mailbox-health.ts → isMailboxHealthy). An unhealthy mailbox
+ * is held at its current limit rather than being auto-graduated, preventing the
+ * warmup schedule from quietly escalating volume on a mailbox that is already
+ * damaging sender reputation. Pass `true` (or omit) when health is confirmed or
+ * when there is not yet enough data to judge.
+ *
+ * The stored daily_send_limit is kept as a floor, so a tenant's configured
+ * value never shrinks (no regression for mailboxes already past warm-up).
  */
-export function effectiveDailyLimit(m: { daily_send_limit: number | null; created_at?: string | null }, now = Date.now()): number {
+export function effectiveDailyLimit(
+  m: { daily_send_limit: number | null; created_at?: string | null },
+  now = Date.now(),
+  healthy = true,
+): number {
   const base = Math.max(0, m.daily_send_limit ?? 0);
   if (base === 0) return 0;
-  const ageDays = m.created_at ? Math.max(0, Math.floor((now - new Date(m.created_at).getTime()) / 86400000)) : 0;
-  return Math.max(base, coldLimitForAge(ageDays));
+  const ageDays = m.created_at
+    ? Math.max(0, Math.floor((now - new Date(m.created_at).getTime()) / 86400000))
+    : 0;
+  const scheduleLimit = coldLimitForAge(ageDays);
+
+  // Unhealthy mailbox: do not graduate beyond the current base (hold, don't grow).
+  if (!healthy) return base;
+
+  return Math.max(base, scheduleLimit);
 }
