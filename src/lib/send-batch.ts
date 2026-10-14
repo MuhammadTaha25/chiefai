@@ -92,16 +92,29 @@ export async function sendBatchForClient(clientId: string) {
     return { clientId, campaignId: campaign.id, result: "skipped", detail: "daily limit already reached" };
   }
 
-  // The client's own window and timezone (clients.outreach_send_start / outreach_send_end / timezone). The default
-  // window 08:00-24:00 applies in the CLIENT's timezone, never a server default. Without a valid client timezone nothing
-  // is sent, because the window would be in the wrong place. Mailboxes run in blocks: mailbox i (in creation order)
-  // owns block i of the day, with a break between blocks. Only the mailbox whose block is running now may send.
-  const { data: clientRow } = await admin.from("clients").select("*").eq("id", clientId).maybeSingle();
-  if (!isValidTimeZone(clientRow?.timezone)) {
+  // Sending window and timezone: campaign-level overrides take precedence over client-level defaults.
+  // The default window 08:00-24:00 applies in the resolved timezone, never a server default. Without
+  // a valid timezone nothing is sent. Mailboxes run in blocks: mailbox i (in creation order) owns
+  // block i of the day. Only the mailbox whose block is running now may send.
+  const [{ data: clientRow }, { data: campaignRow }] = await Promise.all([
+    admin.from("clients").select("*").eq("id", clientId).maybeSingle(),
+    admin.from("campaigns")
+      .select("send_window_start, send_window_end, timezone, template_subject, template_body")
+      .eq("id", campaign.id)
+      .maybeSingle<{ send_window_start: string | null; send_window_end: string | null; timezone: string | null; template_subject: string | null; template_body: string | null }>(),
+  ]);
+  // Campaign overrides fall back to client-level values
+  const resolvedTimezone = campaignRow?.timezone ?? clientRow?.timezone;
+  const resolvedWindowStart = campaignRow?.send_window_start ?? clientRow?.outreach_send_start;
+  const resolvedWindowEnd = campaignRow?.send_window_end ?? clientRow?.outreach_send_end;
+  const resolvedTemplateSubject = campaignRow?.template_subject ?? clientRow?.outreach_template_subject;
+  const resolvedTemplateBody = campaignRow?.template_body ?? clientRow?.outreach_template_body;
+
+  if (!isValidTimeZone(resolvedTimezone)) {
     return { clientId, campaignId: campaign.id, result: "skipped", detail: "client timezone not set: choose it in the sending window settings" };
   }
-  const sendTz = clientRow.timezone;
-  const sendWindow = resolveSendWindow(clientRow?.outreach_send_start, clientRow?.outreach_send_end);
+  const sendTz = resolvedTimezone;
+  const sendWindow = resolveSendWindow(resolvedWindowStart, resolvedWindowEnd);
   const usingDefaultWindow = sendWindow === DEFAULT_SEND_WINDOW;
   const nowMinute = localClock(sendTz).minutes;
   const fmt = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
@@ -302,9 +315,9 @@ export async function sendBatchForClient(clientId: string) {
       } catch {
         // AIDA generation failed (rate-limit, timeout, etc.) — fixed template is already set.
       }
-      if (clientRow?.outreach_template_body && clientRow?.outreach_template_subject) {
+      if (resolvedTemplateBody && resolvedTemplateSubject) {
         const custom = cleanOutreachEmail(
-          renderCustomTemplate(clientRow.outreach_template_subject, clientRow.outreach_template_body, {
+          renderCustomTemplate(resolvedTemplateSubject, resolvedTemplateBody, {
             first_name: isBusinessLead ? null : lead.name,
             company: lead.company,
             industry,
