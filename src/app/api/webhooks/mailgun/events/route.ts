@@ -27,8 +27,14 @@ export async function POST(req: NextRequest) {
   const eventId = String(eventData.id ?? "");
   const recipient = String(eventData.recipient ?? "").trim().toLowerCase();
 
-  // A hard bounce arrives as event "failed" with severity "permanent"; soft failures are retried by Mailgun.
-  const isBounce = eventType === "failed" && String(eventData.severity ?? "") === "permanent";
+  // Hard bounce = "failed" + severity "permanent" (invalid address).
+  // Soft bounce = "failed" + severity "temporary" (server/mailbox error — Mailgun retries for 8 h then gives up).
+  // We capture both so the UI can distinguish them and we can auto-retry soft bounces.
+  const severity = String(eventData.severity ?? "");
+  const isBounce = eventType === "failed" && (severity === "permanent" || severity === "temporary");
+  const bounceType: "permanent" | "temporary" | null =
+    isBounce ? (severity === "permanent" ? "permanent" : "temporary") : null;
+
   if (!eventId || !recipient || !(["complained", "unsubscribed"].includes(eventType) || isBounce)) {
     return NextResponse.json({ ok: true, ignored: eventType });
   }
@@ -79,7 +85,22 @@ export async function POST(req: NextRequest) {
   }
 
   if (isBounce) {
-    await admin.from("leads").update({ email_bounced: true, next_follow_up_at: null }).eq("id", lead.id).eq("client_id", lead.client_id);
+    // Temporary bounce: schedule a retry in 24 hours; do NOT clear next_follow_up_at permanently.
+    // Permanent bounce: mark email dead, clear follow-up forever.
+    const retryAfter =
+      bounceType === "temporary"
+        ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        : null;
+    await admin
+      .from("leads")
+      .update({
+        email_bounced: bounceType === "permanent",
+        bounce_type: bounceType,
+        bounce_retry_after: retryAfter,
+        next_follow_up_at: bounceType === "permanent" ? null : undefined,
+      })
+      .eq("id", lead.id)
+      .eq("client_id", lead.client_id);
   } else if (eventType === "complained") {
     await admin
       .from("leads")
@@ -92,5 +113,10 @@ export async function POST(req: NextRequest) {
       .eq("id", lead.id);
   }
 
-  return NextResponse.json({ ok: true, event: isBounce ? "bounced" : eventType, leadId: lead.id });
+  return NextResponse.json({
+    ok: true,
+    event: isBounce ? "bounced" : eventType,
+    bounceType: bounceType ?? undefined,
+    leadId: lead.id,
+  });
 }

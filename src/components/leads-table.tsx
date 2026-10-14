@@ -51,7 +51,17 @@ function leadDisplay(lead: Lead): { label: string; cls: string; stopped: boolean
   if (lead.booked) return { label: "Booked", cls: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300", stopped: true };
   if (lead.unsubscribed) return { label: "Stopped — unsubscribed", cls: red, stopped: true };
   if (lead.complained) return { label: "Stopped — complaint", cls: red, stopped: true };
-  if (lead.email_bounced) return { label: "Bounced", cls: red, stopped: true };
+  if (lead.email_bounced) return { label: "Bounced — invalid address", cls: red, stopped: true };
+  if (lead.bounce_type === "temporary") {
+    const retryDate = lead.bounce_retry_after
+      ? new Date(lead.bounce_retry_after).toLocaleString("en-US", { dateStyle: "short", timeStyle: "short" })
+      : null;
+    return {
+      label: retryDate ? `Server error — retry ${retryDate}` : "Server error — will retry",
+      cls: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+      stopped: false,
+    };
+  }
   if (lead.manually_stopped) return { label: "Stopped — manual", cls: "bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400", stopped: true };
   if (lead.reply_classification === "BOOKING")
     return { label: "Wants to book (not booked yet)", cls: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300", stopped: false };

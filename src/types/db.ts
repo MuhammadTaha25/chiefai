@@ -32,6 +32,8 @@ export interface Lead {
   booked?: boolean | null;
   unsubscribed?: boolean | null;
   email_bounced?: boolean | null;
+  bounce_type?: "permanent" | "temporary" | null;
+  bounce_retry_after?: string | null;
   complained?: boolean | null;
   manually_stopped?: boolean | null;
   reply_classification?: string | null;
