@@ -139,7 +139,7 @@ export async function reserveMailboxSlot(
   let sawReady = false;
   for (const m of ordered) {
     sawReady = true;
-    const limit = effectiveDailyLimit(m);
+    const limit = effectiveDailyLimit(m, Date.now(), !unhealthy.has(m.id));
     // Contention can make every racing request back off at once (safe, but nobody wins); a short random
     // jitter and retry lets one of them through. The limit is re-checked on every attempt.
     for (let attempt = 0; attempt < 4; attempt++) {

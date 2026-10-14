@@ -79,7 +79,13 @@ export async function sendBatchForClient(clientId: string) {
     admin.from("clients").select("daily_send_cap").eq("id", clientId).maybeSingle<{ daily_send_cap: number | null }>(),
     admin.from("mailboxes").select("id, address, daily_send_limit, created_at").eq("client_id", clientId).order("created_at", { ascending: true }).returns<{ id: string; address: string; daily_send_limit: number | null; created_at: string }[]>(),
   ]);
-  const mailboxCapacity = (capMailboxes ?? []).reduce((sum, m) => sum + effectiveDailyLimit(m), 0);
+  // Health is computed once here for the capacity estimate; reserveMailboxSlot re-checks per slot atomically.
+  const { getUnhealthyMailboxIds: _getUnhealthy } = await import("@/lib/mailbox-health");
+  const unhealthyForCap = await _getUnhealthy(admin, clientId);
+  const mailboxCapacity = (capMailboxes ?? []).reduce(
+    (sum, m) => sum + effectiveDailyLimit(m, Date.now(), !unhealthyForCap.has(m.id)),
+    0,
+  );
   const dailyCap = resolveDailySendCap(capRow?.daily_send_cap, mailboxCapacity);
   const remaining = dailyCap - (sentToday ?? 0);
   if (remaining <= 0) {
