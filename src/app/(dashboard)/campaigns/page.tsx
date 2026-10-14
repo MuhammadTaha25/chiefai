@@ -28,9 +28,9 @@ export default async function CampaignsPage() {
   const admin = createAdminClient();
 
   // Fetch auto-send readiness: mailbox, timezone, and template mode.
-  const [{ data: mailboxRow }, { data: clientRow }] = await Promise.all([
+  const [{ data: mailboxRows }, { data: clientRow }] = await Promise.all([
     client
-      ? admin.from("mailboxes").select("id").eq("client_id", client.id).limit(1).maybeSingle<{ id: string }>()
+      ? admin.from("mailboxes").select("id, daily_send_limit").eq("client_id", client.id).returns<{ id: string; daily_send_limit: number | null }[]>()
       : Promise.resolve({ data: null }),
     client
       ? admin
@@ -41,11 +41,12 @@ export default async function CampaignsPage() {
       : Promise.resolve({ data: null }),
   ]);
 
-  const hasMailbox = !!mailboxRow;
+  const hasMailbox = !!mailboxRows && mailboxRows.length > 0;
+  const hasSendLimit = !!mailboxRows && mailboxRows.some((m) => (m.daily_send_limit ?? 0) > 0);
   const hasTimezone = !!clientRow?.timezone;
   const templateMode: "custom" | "ai" =
     clientRow?.outreach_template_subject && clientRow?.outreach_template_body ? "custom" : "ai";
-  const autoSendReady = hasMailbox && hasTimezone;
+  const autoSendReady = hasMailbox && hasSendLimit && hasTimezone;
 
   const campaignMonth = currentCampaignMonth();
 
@@ -115,11 +116,19 @@ export default async function CampaignsPage() {
                   </a>
                 </li>
               )}
+              {hasMailbox && !hasSendLimit && (
+                <li>
+                  • Daily send limit not set —{" "}
+                  <a href="/settings#mailboxes" className="underline hover:text-amber-800 dark:hover:text-amber-200">
+                    set it in Settings → Mailboxes
+                  </a>
+                </li>
+              )}
               {!hasTimezone && (
                 <li>
                   • Sending timezone not set —{" "}
-                  <a href="/settings" className="underline hover:text-amber-800 dark:hover:text-amber-200">
-                    set it in Settings
+                  <a href="/settings#sending-schedule" className="underline hover:text-amber-800 dark:hover:text-amber-200">
+                    set it in Settings → Sending Schedule
                   </a>
                 </li>
               )}
