@@ -116,6 +116,17 @@ export async function sendBatchForClient(clientId: string) {
   let plan = planBlocks(sendWindow, blockMailboxes.length, dailyCap);
   let pacingWarning: string | undefined;
   if (!plan.feasible) {
+    if (plan.maxSends === 0) {
+      // Window is too narrow for even one send per mailbox at the minimum gap.
+      // Most common cause: many mailboxes with a short send window.
+      // Tell the operator clearly rather than silently skipping.
+      return {
+        clientId,
+        campaignId: campaign.id,
+        result: "skipped",
+        detail: `send window ${windowLabel} is too narrow for ${blockMailboxes.length} mailbox${blockMailboxes.length === 1 ? "" : "es"} — widen the window in Settings → Sending Schedule (need at least ${blockMailboxes.length} hour${blockMailboxes.length === 1 ? "" : "s"} for ${blockMailboxes.length} mailbox${blockMailboxes.length === 1 ? "" : "es"})`,
+      };
+    }
     plan = planBlocks(sendWindow, blockMailboxes.length, plan.maxSends);
     pacingWarning = `Daily total ${dailyCap} does not fit the ${windowLabel} window at the 5-minute floor; sending ${plan.perMailbox * blockMailboxes.length} today, the rest waits for tomorrow.`;
   }

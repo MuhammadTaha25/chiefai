@@ -1,12 +1,36 @@
 /**
- * Daily first-email cap per tenant. Additive on purpose: with no override the cap is the historical constant (4),
- * so existing tenants behave exactly as before. A tenant with clients.daily_send_cap set (e.g. 150) is capped by
- * the SMALLER of that number and what its own mailboxes can actually send today (sum of their warmup-limited
- * daily limits), so the cap can never push a mailbox past its warmup ramp.
+ * Daily first-email cap per tenant.
+ *
+ * Three cases:
+ *
+ * 1. No override set  →  use mailboxCapacity (sum of per-mailbox warmup limits).
+ *    If mailboxCapacity is also 0 (no mailboxes configured yet), fall back to 4
+ *    so a brand-new tenant still sees the historical safe default.
+ *
+ * 2. Override set, mailboxCapacity > 0  →  cap at the SMALLER of override and
+ *    what the mailboxes can actually deliver today.  This prevents the override
+ *    from pushing a single mailbox beyond its warmup ramp.
+ *
+ * 3. Override set, mailboxCapacity = 0  →  use the override as-is.  The mailboxes
+ *    don't have per-mailbox limits stored but the tenant has explicitly asked for a
+ *    total; the warmup guard is already baked into effectiveDailyLimit (called
+ *    upstream) so we trust it here.
  */
 export const DEFAULT_DAILY_INITIAL_SEND_LIMIT = 4;
 
 export function resolveDailySendCap(override: number | null | undefined, mailboxCapacity: number): number {
-  if (!override || !Number.isFinite(override) || override <= 0) return DEFAULT_DAILY_INITIAL_SEND_LIMIT;
-  return Math.max(0, Math.min(Math.floor(override), Math.max(0, Math.floor(mailboxCapacity))));
+  const cap = Math.max(0, Math.floor(mailboxCapacity));
+
+  // No override → honour whatever the mailboxes collectively allow.
+  if (!override || !Number.isFinite(override) || override <= 0) {
+    return cap > 0 ? cap : DEFAULT_DAILY_INITIAL_SEND_LIMIT;
+  }
+
+  const overrideSafe = Math.floor(override);
+
+  // Override set + mailboxes have capacity → bounded by the lower of the two.
+  if (cap > 0) return Math.min(overrideSafe, cap);
+
+  // Override set + no per-mailbox limits stored → trust the override directly.
+  return overrideSafe;
 }

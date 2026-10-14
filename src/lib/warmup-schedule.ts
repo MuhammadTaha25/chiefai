@@ -40,21 +40,31 @@ export function coldLimitForAge(ageDays: number): number {
  *
  * The stored daily_send_limit is kept as a floor, so a tenant's configured
  * value never shrinks (no regression for mailboxes already past warm-up).
+ *
+ * If daily_send_limit is null or 0 (not yet set by the operator), the mailbox still
+ * contributes warmup-based capacity so the send system can work even when the UI
+ * field hasn't been filled in.  The warmup curve itself IS the default limit in
+ * that case.  Operators who need a hard cap must set daily_send_limit explicitly.
  */
 export function effectiveDailyLimit(
   m: { daily_send_limit: number | null; created_at?: string | null },
   now = Date.now(),
   healthy = true,
 ): number {
-  const base = Math.max(0, m.daily_send_limit ?? 0);
-  if (base === 0) return 0;
   const ageDays = m.created_at
     ? Math.max(0, Math.floor((now - new Date(m.created_at).getTime()) / 86400000))
     : 0;
   const scheduleLimit = coldLimitForAge(ageDays);
 
-  // Unhealthy mailbox: do not graduate beyond the current base (hold, don't grow).
+  const base = Math.max(0, m.daily_send_limit ?? 0);
+
+  // No per-mailbox limit set → use the warmup curve directly (safe default).
+  if (base === 0) return scheduleLimit;
+
+  // Unhealthy mailbox: hold at current configured limit, no graduation.
   if (!healthy) return base;
 
+  // Healthy mailbox: whichever is higher — the operator cap or the warmup schedule
+  // (so fully-warmed mailboxes honour a higher configured limit).
   return Math.max(base, scheduleLimit);
 }

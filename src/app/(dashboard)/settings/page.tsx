@@ -244,8 +244,9 @@ export default async function SettingsPage(props: {
       <section id="mailboxes">
         <h2 className="text-lg font-semibold">Mailboxes</h2>
         <p className="mt-1 text-sm text-zinc-500">
-          Set a daily send limit for each mailbox. The warmup schedule starts at 4/day and ramps
-          up automatically — your limit acts as a floor once the mailbox is established.
+          Optionally set a daily send limit per mailbox. Without a limit the warmup curve governs
+          (starts at 4/day, ramps to 30 over ~3 weeks). Setting a limit caps sends at that number
+          once the warmup schedule would otherwise exceed it.
         </p>
         <div className="mt-3">
           <MailboxSendLimitEditor mailboxes={mailboxes ?? []} />

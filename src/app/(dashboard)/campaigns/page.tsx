@@ -42,11 +42,13 @@ export default async function CampaignsPage() {
   ]);
 
   const hasMailbox = !!mailboxRows && mailboxRows.length > 0;
-  const hasSendLimit = !!mailboxRows && mailboxRows.some((m) => (m.daily_send_limit ?? 0) > 0);
+  // A mailbox with no explicit limit still sends via the warmup curve (effectiveDailyLimit
+  // now returns coldLimitForAge when daily_send_limit is null), so any mailbox counts.
+  const hasSendLimit = hasMailbox; // renamed for clarity — kept in place to avoid JSX churn
   const hasTimezone = !!clientRow?.timezone;
   const templateMode: "custom" | "ai" =
     clientRow?.outreach_template_subject && clientRow?.outreach_template_body ? "custom" : "ai";
-  const autoSendReady = hasMailbox && hasSendLimit && hasTimezone;
+  const autoSendReady = hasMailbox && hasTimezone;
 
   const campaignMonth = currentCampaignMonth();
 
