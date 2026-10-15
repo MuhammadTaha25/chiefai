@@ -7,8 +7,7 @@ import { sendMail, mailgunDomainForAddress } from "@/lib/mailgun";
 import { withUnsubscribeFooter, unsubscribeHeaders } from "@/lib/compliance";
 import { logEvent } from "@/lib/log-event";
 import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
-
-const FOLLOW_UP_INTERVAL_DAYS = 3;
+import { resolveFirstFollowUpDelayMs } from "@/lib/follow-up-config";
 
 /**
  * Public, unauthenticated endpoint — the ads landing page form posts here.
@@ -169,7 +168,8 @@ export async function POST(req: NextRequest) {
 
       const sentMsg = await sendMail({
         domain: mailgunDomainForAddress(mailbox.address),
-        from: mailbox.address,
+        // Same sender display name as the other send paths, so the sender looks the same across a lead's emails.
+        from: `${(client.company_name ?? "").replace(/["<>\r\n]/g, "").trim() || "Team"} <${mailbox.address}>`,
         to: lead.email,
         subject: draft.subject,
         text: withUnsubscribeFooter(draft.body, { company: client.company_name }),
@@ -184,7 +184,7 @@ export async function POST(req: NextRequest) {
             status: "email_sent",
             follow_up_number: 1,
             last_contact_at: new Date().toISOString(),
-            next_follow_up_at: new Date(Date.now() + FOLLOW_UP_INTERVAL_DAYS * 86400000).toISOString(),
+            next_follow_up_at: new Date(Date.now() + resolveFirstFollowUpDelayMs(job?.criteria)).toISOString(),
           })
           .eq("id", lead.id),
       ]);

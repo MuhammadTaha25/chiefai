@@ -5,8 +5,8 @@ import { sendMail, mailgunDomainForAddress } from "@/lib/mailgun";
 import { withUnsubscribeFooter, unsubscribeHeaders } from "@/lib/compliance";
 import { draftFollowUpEmail } from "@/lib/gemini";
 import { cleanOutreachEmail } from "@/lib/email-quality";
-import { FORM_LEAD_SOURCE, autoSendSince } from "@/lib/campaign";
-import { resolveFollowUpIntervalMs } from "@/lib/follow-up-config";
+import { autoSendSince } from "@/lib/campaign";
+import { resolveFollowUpIntervalMs, planFollowUp } from "@/lib/follow-up-config";
 import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
 
 // Cadence between stages comes from follow-up-config.ts (client-configurable
@@ -17,6 +17,11 @@ import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDiscon
 // Hard system ceiling — never exceeded regardless of any client-configured
 // follow-up count (maxFollowUpsFor below can only make this stricter).
 const HARD_MAX_FOLLOW_UPS = 3;
+
+// Back-off after a draft/send failure (transient Gemini/Mailgun error): the lead keeps its place in the sequence.
+const SEND_FAILURE_RETRY_MS = 60 * 60 * 1000;
+// Back-off for problems that need a human fix (missing config, unknown original mailbox): once a day.
+const NEEDS_ATTENTION_RETRY_MS = 24 * 60 * 60 * 1000;
 
 const FOLLOW_UP_COUNT_WORDS: Record<string, number> = {
   "no follow-up": 0,
@@ -49,10 +54,20 @@ interface DueLead {
 // backlog of failing leads for one tenant cannot starve other tenants.
 const MAX_LEADS_PER_CLIENT = 5;
 
+// Puts a claimed lead back in the queue after a problem. Guarded with `is null` so it can never overwrite a
+// next_follow_up_at that something else has set in the meantime.
+async function deferFollowUp(admin: ReturnType<typeof createAdminClient>, leadId: string, delayMs: number) {
+  await admin
+    .from("leads")
+    .update({ next_follow_up_at: new Date(Date.now() + delayMs).toISOString() })
+    .eq("id", leadId)
+    .is("next_follow_up_at", null);
+}
+
 /**
  * One follow-up batch: picks up leads whose next_follow_up_at has passed, drafts a short follow-up, sends it
- * through a ready mailbox with capacity, and reschedules the next one (or stops at the client's cap). Shared by
- * the cron/manual route and by tests; `isCron` applies the automation-only lead rules.
+ * through the SAME mailbox that sent the lead's first email, and reschedules the next one (or stops at the client's
+ * cap). Shared by the cron/manual route and by tests; `isCron` applies the automation-only lead rules.
  *
  * Multi-tenant fairness: in cron mode the batch is built per-client (round-robin style) so one
  * client's stale/failing leads cannot block other tenants from being processed.
@@ -193,24 +208,66 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
       // A client can configure fewer follow-ups, never more than the spec's
       // hard system ceiling of 3 (§17).
       const maxFollowUps = Math.min(maxFollowUpsFor(job?.criteria?.follow_ups as string | undefined), HARD_MAX_FOLLOW_UPS);
-      const nextFollowUpNumber = (lead.follow_up_number ?? 0) + 1;
 
-      if (!sellingDescription || nextFollowUpNumber > maxFollowUps) {
-        // Cap reached (or nothing to draft from) — stop scheduling further follow-ups.
+      // follow_up_number counts the INITIAL email as 1, so the cap, touch number, status and email angle all come
+      // from one helper (see planFollowUp) — otherwise "3 follow-ups" sends only 2 and touch numbers skip a value.
+      const { nextFollowUpNumber, followUpIndex, capped, isLast, status } = planFollowUp(lead.follow_up_number, maxFollowUps);
+
+      if (!sellingDescription) {
+        // Nothing to draft from. This is a config problem, not a cap — keep the lead in the sequence and retry
+        // daily so it resumes by itself once the client saves their outreach description.
+        await deferFollowUp(admin, lead.id, NEEDS_ATTENTION_RETRY_MS);
+        results.push({ leadId: lead.id, result: "skipped", detail: "no saved outreach description (what_you_sell) — will retry in 24h" });
+        continue;
+      }
+
+      if (capped) {
+        // Cap reached — stop scheduling further follow-ups.
         await admin.from("leads").update({ next_follow_up_at: null }).eq("id", lead.id);
         results.push({ leadId: lead.id, result: "capped" });
         continue;
       }
 
-      // Reserve a mailbox slot (daily limit, atomic) BEFORE drafting/sending. No capacity or no ready
+      // A follow-up must come from the SAME mailbox as the lead's first email (thread continuity, and a sender that
+      // suddenly changes mid-thread looks suspicious). The mailbox is read from the lead's earliest logged send and
+      // pinned below; if it is unavailable the follow-up WAITS — it never switches to another mailbox.
+      const { data: firstSend } = await admin
+        .from("outreach_log")
+        .select("mailbox_id")
+        .eq("client_id", lead.client_id)
+        .eq("lead_id", lead.id)
+        .not("mailbox_id", "is", null)
+        .order("sent_at", { ascending: true })
+        .limit(1)
+        .maybeSingle<{ mailbox_id: string }>();
+      if (!firstSend?.mailbox_id) {
+        await deferFollowUp(admin, lead.id, NEEDS_ATTENTION_RETRY_MS);
+        results.push({ leadId: lead.id, result: "skipped", detail: "no earlier send recorded for this lead, so the original mailbox is unknown — follow-up held, will retry in 24h" });
+        continue;
+      }
+
+      // Reserve a slot on that mailbox (daily limit, atomic) BEFORE drafting/sending. No capacity or an unready
       // mailbox is temporary: put the follow-up back exactly as it was so a later run retries it.
-      const reservation = await reserveMailboxSlot(admin, lead.client_id, lead.id, {
-        touch_number: nextFollowUpNumber + 1,
-        campaign_id: lead.campaign_id,
-      });
+      // touch_number: the initial email is touch 1, so the first follow-up is touch 2 (= nextFollowUpNumber).
+      const reservation = await reserveMailboxSlot(
+        admin,
+        lead.client_id,
+        lead.id,
+        { touch_number: nextFollowUpNumber, campaign_id: lead.campaign_id },
+        { mailboxId: firstSend.mailbox_id },
+      );
       if (!reservation.ok) {
         await admin.from("leads").update({ next_follow_up_at: lead.next_follow_up_at }).eq("id", lead.id).is("next_follow_up_at", null);
-        results.push({ leadId: lead.id, result: "skipped", detail: reservation.reason === "at_capacity" ? "mailbox daily limit reached" : reservation.reason === "all_unhealthy" ? "all mailboxes paused: high bounce/complaint rate" : "no ready mailbox" });
+        results.push({
+          leadId: lead.id,
+          result: "skipped",
+          detail:
+            reservation.reason === "at_capacity"
+              ? "original mailbox daily limit reached — waiting (follow-ups never switch mailbox)"
+              : reservation.reason === "all_unhealthy"
+                ? "original mailbox paused: high bounce/complaint rate — waiting (follow-ups never switch mailbox)"
+                : "original mailbox not ready — waiting (follow-ups never switch mailbox)",
+        });
         continue;
       }
       const mailbox = reservation.mailbox;
@@ -223,22 +280,27 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
         // Back off 24 hours instead of restoring the original timestamp — this prevents stale domain
         // failures from re-entering the queue every hour and starving other leads. Once per day is
         // frequent enough to pick up automatically when the domain issue is resolved.
-        const retryAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-        await admin.from("leads").update({ next_follow_up_at: retryAt }).eq("id", lead.id).is("next_follow_up_at", null);
+        await deferFollowUp(admin, lead.id, NEEDS_ATTENTION_RETRY_MS);
         results.push({ leadId: lead.id, result: "error", detail: `Domain ${mailboxDomain} is not usable (ownership unverified or disconnected) — follow-up blocked, will retry in 24h` });
         continue;
       }
 
+      // Set once Mailgun has accepted the email. After that point the follow-up IS sent, so a later database
+      // error must never release the slot or put the lead back in the queue (that would send it twice).
+      let mailSent = false;
       try {
       const businessContext = formatBusinessContext(await getClientBusinessContext(admin, lead.client_id));
-      // Thread the follow-up onto the last message we sent this lead (provider
+      // Thread the follow-up onto the last message we really sent this lead (provider
       // message id from add_email_threading.sql). Missing/undefined is fine.
+      // The "pending:" rows are mailbox-slot reservations (this run's own included, inserted a moment ago with
+      // sent_at = now()); they are not real Message-Ids and would put a bogus In-Reply-To/References on the email.
       const { data: prevSend } = await admin
         .from("outreach_log")
         .select("provider_message_id")
         .eq("client_id", lead.client_id)
         .eq("lead_id", lead.id)
         .not("provider_message_id", "is", null)
+        .not("provider_message_id", "like", "pending:%")
         .order("sent_at", { ascending: false })
         .limit(1)
         .maybeSingle<{ provider_message_id: string }>();
@@ -249,7 +311,8 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
         // Directory leads are businesses: their "name" is the company name, so greet generically.
         leadName: (lead.name ?? "").trim().toLowerCase() === (lead.company ?? "").trim().toLowerCase() ? "there" : lead.name || "there",
         leadCompany: lead.company || "your company",
-        followUpNumber: nextFollowUpNumber,
+        // The drafter's angle table (gemini.ts FOLLOW_UP_ANGLES) is 1-based over follow-ups: 1 = first follow-up.
+        followUpNumber: followUpIndex,
       }));
 
       const sentMsg = await sendMail({
@@ -261,17 +324,18 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
         text: withUnsubscribeFooter(draft.body, { company: client?.company_name, postalAddress: client?.postal_address }),
         headers: unsubscribeHeaders(mailbox.address),
       });
+      mailSent = true;
 
       await Promise.all([
         finalizeReservation(admin, reservation.reservationId, { messageId: sentMsg.id, subject: draft.subject, body: draft.body }),
         admin
           .from("leads")
           .update({
-            status: `follow_up_${Math.min(nextFollowUpNumber, 10)}`,
+            status,
             follow_up_number: nextFollowUpNumber,
             last_contact_at: new Date().toISOString(),
             next_follow_up_at:
-              nextFollowUpNumber >= maxFollowUps
+              isLast
                 ? null
                 : new Date(Date.now() + resolveFollowUpIntervalMs(job?.criteria)).toISOString(),
           })
@@ -280,7 +344,16 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
 
       results.push({ leadId: lead.id, result: "sent" });
       } catch (sendErr) {
+        if (mailSent) {
+          // The email already went out; do not release the slot or requeue the lead (no double send).
+          // Surface it loudly so the lead's row can be checked by hand.
+          results.push({ leadId: lead.id, result: "error", detail: `email SENT but recording it failed — check this lead manually: ${(sendErr as Error).message}` });
+          continue;
+        }
         await releaseReservation(admin, reservation.reservationId);
+        // Draft/send failed before anything went out: keep the lead in the sequence and retry in an hour,
+        // instead of leaving next_follow_up_at null (which would silently end its sequence).
+        await deferFollowUp(admin, lead.id, SEND_FAILURE_RETRY_MS);
         throw sendErr;
       }
     } catch (err) {
