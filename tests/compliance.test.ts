@@ -52,3 +52,18 @@ test("lint rejects invented statistics and customer claims", async () => {
   assert.ok(lintOutreachEmail({ subject: "quick idea", body: base + " We lift replies by 40%." }, { firstTouch: false }).includes("invented statistic"));
   assert.deepEqual(lintOutreachEmail({ subject: "quick idea", body: base + " Open to a 15-minute call?" }, { firstTouch: false }), []);
 });
+
+test("spam score: normal outreach stays under the limit, stacked spam signals fail", async () => {
+  const { spamScore, lintOutreachEmail, SPAM_SCORE_LIMIT } = await import("../src/lib/email-quality.ts");
+  const ok = { subject: "quick question about acme realty", body: "Hi Sam, most agencies lose warm buyers when replies come late. We set up automatic replies so every enquiry gets an answer within minutes. Would a quick chat next week help?" };
+  assert.ok(spamScore(ok).total < SPAM_SCORE_LIMIT);
+  assert.deepEqual(lintOutreachEmail(ok), []);
+  const spammy = { subject: "AMAZING OFFER $$ just for you", body: "Hi Sam, special offer: save big with our game-changer, only 3 spots left, hurry. Reply now at bit.ly/xyz to get a discount on a proven system for your agency this week." };
+  const s = spamScore(spammy);
+  assert.ok(s.total >= SPAM_SCORE_LIMIT, `score ${s.total}`);
+  assert.ok(lintOutreachEmail(spammy).some((i) => i.startsWith("spam score")));
+  // one weak signal alone is allowed
+  assert.ok(spamScore({ subject: "idea for acme", body: ok.body + " Happy to leverage what we have built." }).total < SPAM_SCORE_LIMIT);
+  // obfuscation is caught
+  assert.ok(spamScore({ subject: "idea", body: "Hi Sam, get f.r.e.e.d.o.m from slow replies with our tool, it works well for most agencies and teams. Open to a short chat next week?" }).hits.includes("obfuscated text"));
+});

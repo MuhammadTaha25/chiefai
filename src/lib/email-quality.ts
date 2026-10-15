@@ -29,6 +29,32 @@ const SPAM_PHRASES = [
   "$$$",
 ];
 
+/**
+ * Weighted spam patterns, in the spirit of SpamAssassin / classic ML spam filters: one weak signal is fine, several
+ * add up. Each hit adds its weight once; a draft at SPAM_SCORE_LIMIT or above is treated as spammy and not sent.
+ * (The hard-block SPAM_PHRASES above fail on their own regardless of score.)
+ */
+export const SPAM_SCORE_LIMIT = 3;
+const SPAM_PATTERNS: { re: RegExp; weight: number; label: string }[] = [
+  // pressure / urgency
+  { re: /\b(don'?t miss|last chance|hurry|expires?|deadline|only \d+ (left|spots?)|while (supplies|stocks) last|today only|offer ends)\b/i, weight: 2, label: "pressure wording" },
+  { re: /\b(act (fast|today)|apply now|order now|call now|sign up now|get started now|reply now)\b/i, weight: 2, label: "call-now wording" },
+  // money / offers
+  { re: /(\$\s?\d|\b\d+\s?(usd|dollars)\b|\b\d+\s?% off\b|\bdiscount|\bcheap(est)?\b|\blowest price|\bsave big|\bbargain|\bprofit|\bincome\b|\bpassive income|\bcredit card|\bloan\b)/i, weight: 2, label: "money wording" },
+  { re: /\b(exclusive (deal|offer)|special (offer|promotion|deal)|incredible|amazing (offer|deal)|unbeatable|best price|no (cost|fee|strings|catch)|no credit check)\b/i, weight: 2, label: "offer hype" },
+  // hype claims
+  { re: /\b(game[- ]?chang(er|ing)|revolutionary|skyrocket|explode your|10x|proven (system|method)|miracle|breakthrough|guaranteed results?|best[- ]in[- ]class|world[- ]class|cutting[- ]edge)\b/i, weight: 1, label: "hype claim" },
+  // classic cold-email tells
+  { re: /\b(i hope this (email|message) finds you|dear (sir|madam|friend|customer)|to whom it may concern|quick favou?r|just checking in|just following up|per my last)\b/i, weight: 1, label: "cold-email cliche" },
+  { re: /\b(synergy|touch base|circle back|low[- ]hanging fruit|leverage|win[- ]win)\b/i, weight: 1, label: "buzzword" },
+  // deceptive framing
+  { re: /\b(you('ve| have)? (won|been selected|are a winner)|this is not spam|not a scam|as seen on|you are (pre[- ]?)?approved|final notice)\b/i, weight: 3, label: "deceptive framing" },
+  // link shorteners / tracking-ish
+  { re: /\b(bit\.ly|tinyurl\.com|t\.co|goo\.gl|ow\.ly|is\.gd|rb\.gy|cutt\.ly)\//i, weight: 3, label: "link shortener" },
+  // obfuscation: f.r.e.e, fr33, spaced letters
+  { re: /\b(?:[a-z]\.){3,}[a-z]\b|\b(fr33|v1agra|cl1ck|0ffer|g00d)\b|\b(?:[a-z] ){5,}[a-z]\b/i, weight: 3, label: "obfuscated text" },
+];
+
 const URL_RE = /\b(?:https?:\/\/|www\.)\S+/i;
 
 const wordCount = (s: string) => (s.trim() ? s.trim().split(/\s+/).length : 0);
@@ -57,6 +83,33 @@ export function cleanOutreachEmail(d: Draft): Draft {
   return { subject, body };
 }
 
+/** Weighted spam score of a draft (subject counts double for the signals that matter most there). */
+export function spamScore(d: Draft): { total: number; hits: string[] } {
+  const subject = d.subject.trim();
+  const body = d.body.trim();
+  const text = `${subject}\n${body}`;
+  let total = 0;
+  const hits: string[] = [];
+  const add = (w: number, label: string) => { total += w; hits.push(label); };
+  for (const p of SPAM_PATTERNS) if (p.re.test(text)) add(p.weight, p.label);
+  // Subject-line tells.
+  if (/\$|%/.test(subject)) add(1, "$ or % in subject");
+  if (subject && subject === subject.toUpperCase() && /[A-Z]{4,}/.test(subject)) add(2, "all-caps subject");
+  if (/\b(re|fwd?):/i.test(subject)) add(2, "fake reply subject");
+  if (/\b(open|read|see) (this|inside)\b|\bnew message\b|\bimportant\b|\bfinal\b/i.test(subject)) add(1, "clickbait subject");
+  // Shouting and punctuation in the body.
+  const shouted = (body.match(/\b[A-Z]{4,}\b/g) ?? []).length;
+  if (shouted >= 2) add(1, "capitalised words");
+  if (/[?!]{2,}/.test(text)) add(1, "repeated punctuation");
+  // Density: a high share of sales words relative to length reads as a promotion, not a note.
+  const sales = (text.match(/\b(offer|deal|sale|promo|promotion|discount|bonus|prize|reward|special|exclusive|guarantee\w*|instant(ly)?|amazing|incredible|unlimited)\b/gi) ?? []).length;
+  const words = Math.max(1, wordCount(body));
+  if (sales >= 2 && sales / words > 0.06) add(2, "sales-word density");
+  // Several links in one note.
+  if ((body.match(/\bhttps?:\/\/\S+/gi) ?? []).length >= 2) add(2, "multiple links");
+  return { total, hits };
+}
+
 /** Empty list = safe to send. */
 export function lintOutreachEmail(d: Draft, opts: { firstTouch?: boolean } = { firstTouch: true }): string[] {
   const issues: string[] = [];
@@ -83,6 +136,8 @@ export function lintOutreachEmail(d: Draft, opts: { firstTouch?: boolean } = { f
   if (/\b\d+(\.\d+)?\s*\+?\s*(%|percent\b|hours?\s+(per|a|each|every)\b|x\s+(more|faster|better))/i.test(body)) issues.push("invented statistic");
   if (/\b(clients|customers|users|businesses)\s+(report|say|tell us|see|have seen)\b/i.test(body)) issues.push("invented customer claim");
   if ((body.match(/!/g) ?? []).length > 1) issues.push("more than one exclamation mark");
+  const score = spamScore(d);
+  if (score.total >= SPAM_SCORE_LIMIT) issues.push(`spam score ${score.total} (limit ${SPAM_SCORE_LIMIT}): ${score.hits.join(", ")}`);
   const letters = body.replace(/[^A-Za-z]/g, "");
   if (letters.length > 40 && letters.replace(/[^A-Z]/g, "").length / letters.length > 0.3) issues.push("too much capitalisation");
   return issues;
