@@ -318,11 +318,12 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
         previousEmails: (priorSends ?? []).filter((p) => p.body).map((p) => ({ subject: p.subject ?? "", body: p.body ?? "" })),
       };
       // Never send a follow-up that trips the spam checks (e.g. "free"): redraft a few times, then defer the lead.
+      const earlierBodies = (priorSends ?? []).map((p) => p.body ?? "").filter(Boolean);
       let draft = cleanOutreachEmail(await draftFollowUpEmail(draftParams));
-      let lintIssues = lintOutreachEmail(draft, { firstTouch: false });
+      let lintIssues = lintOutreachEmail(draft, { firstTouch: false, earlierBodies });
       for (let attempt = 0; lintIssues.length && attempt < 2; attempt++) {
         draft = cleanOutreachEmail(await draftFollowUpEmail(draftParams));
-        lintIssues = lintOutreachEmail(draft, { firstTouch: false });
+        lintIssues = lintOutreachEmail(draft, { firstTouch: false, earlierBodies });
       }
       if (lintIssues.length) throw new Error(`Follow-up draft failed spam checks: ${lintIssues.join("; ")}`);
       // Same subject as the first email (no "Re:") so Gmail and other clients group every touch into ONE thread

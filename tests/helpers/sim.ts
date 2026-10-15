@@ -33,6 +33,8 @@ export const ai = {
   followUpCalls: [] as Record<string, unknown>[],
   followUpFailTimes: 0,
   followUpSubject: "Totally different subject",
+  /** When set, every call returns a different body (real drafts differ per touch; identical ones are rejected as templated). */
+  rotateBodies: true,
   followUpBody: "Hey there, just floating this back up in case it got buried. Happy to share a quick example if it helps. Would a short chat next week suit you?",
   aidaCalls: [] as Record<string, unknown>[],
   aidaFails: false,
@@ -40,15 +42,18 @@ export const ai = {
   aidaBody:
     "Hi Sam,\n\nMost real estate teams lose warm enquiries because replies come hours late. We set up automatic replies and follow-ups so every enquiry gets an answer within minutes, and your agents only step in once a buyer is ready to talk.\n\nWould it be useful if I sent over a short example of how it works for an agency your size?\n\nBest,\nTest Co",
   defaultAidaBody: "",
+  defaultFollowUpBody: "",
   reset() {
     this.followUpCalls = []; this.followUpFailTimes = 0; this.aidaCalls = []; this.aidaFails = false;
     this.aidaBody = this.defaultAidaBody;
     this.followUpSubject = "Totally different subject";
+    this.followUpBody = this.defaultFollowUpBody;
     this.aidaSubject = "Faster follow-ups for agents";
   },
 };
 
 ai.defaultAidaBody = ai.aidaBody;
+ai.defaultFollowUpBody = ai.followUpBody;
 
 export async function loadApp() {
   mock.module(src("lib/supabase/admin.ts"), { namedExports: { createAdminClient: () => db } });
@@ -72,7 +77,13 @@ export async function loadApp() {
       draftFollowUpEmail: async (params: Record<string, unknown>) => {
         ai.followUpCalls.push(params);
         if (ai.followUpFailTimes > 0) { ai.followUpFailTimes--; throw new Error("Gemini 429 (simulated)"); }
-        return { subject: ai.followUpSubject, body: ai.followUpBody };
+        const variants = [
+          ai.followUpBody,
+          "Quick thought for Acme: when enquiries land during viewings, who picks them up? Curious whether some wait until evening and go cold. Is that something you see?",
+          "Different question entirely: what does your team do with enquiries that arrive on weekends? Wondering if a simple auto-reply could cover that gap. Worth exploring?",
+        ];
+        const body = ai.rotateBodies && ai.followUpBody === ai.defaultFollowUpBody ? variants[(ai.followUpCalls.length - 1) % variants.length] : ai.followUpBody;
+        return { subject: ai.followUpSubject, body };
       },
       draftOfferPhrases: async () => ({ offer: "automate customer follow-ups", benefit: "save hours every week" }),
       draftAidaEmail: async (params: Record<string, unknown>) => {

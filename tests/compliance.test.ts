@@ -67,3 +67,13 @@ test("spam score: normal outreach stays under the limit, stacked spam signals fa
   // obfuscation is caught
   assert.ok(spamScore({ subject: "idea", body: "Hi Sam, get f.r.e.e.d.o.m from slow replies with our tool, it works well for most agencies and teams. Open to a short chat next week?" }).hits.includes("obfuscated text"));
 });
+
+test("lint rejects a follow-up that copies earlier wording, and subjects over 50 characters", async () => {
+  const { lintOutreachEmail } = await import("../src/lib/email-quality.ts");
+  const first = "Hi Sam, most agencies lose warm buyers when replies come late. We set up automatic replies so every enquiry gets an answer within minutes. Would a quick chat next week help?";
+  const copy = "Hi Sam, most agencies lose warm buyers when replies come late. We set up automatic replies so every enquiry gets answered. Is a short chat this week useful?";
+  assert.ok(lintOutreachEmail({ subject: "quick idea", body: copy }, { firstTouch: false, earlierBodies: [first] }).includes("repeats wording from earlier emails"));
+  const fresh = "Hi Sam, how do you handle enquiries that arrive while your team is out at viewings? Curious whether anything slips through on busy days. Is that something you notice?";
+  assert.deepEqual(lintOutreachEmail({ subject: "quick idea", body: fresh }, { firstTouch: false, earlierBodies: [first] }), []);
+  assert.ok(lintOutreachEmail({ subject: "a very long subject line that goes well past fifty characters", body: fresh }, { firstTouch: false }).some((i) => i.startsWith("subject longer")));
+});

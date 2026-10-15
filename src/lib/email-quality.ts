@@ -110,15 +110,32 @@ export function spamScore(d: Draft): { total: number; hits: string[] } {
   return { total, hits };
 }
 
+/** Share of this text's 3-word runs that already appear in earlier emails (0-1). Near-copies read as templated mail. */
+export function repeatedWordingShare(text: string, earlier: string[]): number {
+  const grams = (t: string) => {
+    const w = t.toLowerCase().replace(/[^a-z0-9\s']/g, " ").split(/\s+/).filter(Boolean);
+    const out = new Set<string>();
+    for (let i = 0; i + 2 < w.length; i++) out.add(w.slice(i, i + 3).join(" "));
+    return out;
+  };
+  const mine = grams(text);
+  if (!mine.size) return 0;
+  const seen = new Set<string>();
+  for (const e of earlier) for (const g of grams(e)) seen.add(g);
+  let hit = 0;
+  for (const g of mine) if (seen.has(g)) hit++;
+  return hit / mine.size;
+}
+
 /** Empty list = safe to send. */
-export function lintOutreachEmail(d: Draft, opts: { firstTouch?: boolean } = { firstTouch: true }): string[] {
+export function lintOutreachEmail(d: Draft, opts: { firstTouch?: boolean; earlierBodies?: string[] } = { firstTouch: true }): string[] {
   const issues: string[] = [];
   const subject = d.subject.trim();
   const body = d.body.trim();
   const text = `${subject}\n${body}`.toLowerCase();
 
   if (!subject) issues.push("empty subject");
-  if (subject.length > 60) issues.push("subject longer than 60 characters");
+  if (subject.length > 50) issues.push("subject longer than 50 characters");
   if (/[!?]{2,}/.test(subject) || subject.includes("!")) issues.push("subject contains exclamation marks");
   if (/^(re|fwd?|fw)\s*:/i.test(subject)) issues.push("subject fakes a reply/forward");
   if (/\p{Extended_Pictographic}/u.test(text)) issues.push("contains emoji");
@@ -136,6 +153,7 @@ export function lintOutreachEmail(d: Draft, opts: { firstTouch?: boolean } = { f
   if (/\b\d+(\.\d+)?\s*\+?\s*(%|percent\b|hours?\s+(per|a|each|every)\b|x\s+(more|faster|better))/i.test(body)) issues.push("invented statistic");
   if (/\b(clients|customers|users|businesses)\s+(report|say|tell us|see|have seen)\b/i.test(body)) issues.push("invented customer claim");
   if ((body.match(/!/g) ?? []).length > 1) issues.push("more than one exclamation mark");
+  if (opts.earlierBodies?.length && repeatedWordingShare(body, opts.earlierBodies) > 0.35) issues.push("repeats wording from earlier emails");
   const score = spamScore(d);
   if (score.total >= SPAM_SCORE_LIMIT) issues.push(`spam score ${score.total} (limit ${SPAM_SCORE_LIMIT}): ${score.hits.join(", ")}`);
   const letters = body.replace(/[^A-Za-z]/g, "");
