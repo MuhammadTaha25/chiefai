@@ -69,8 +69,19 @@ export function buildDomainPipeline(i: PipelineInput): DomainPipeline {
   else dns = { key: "dns", label: "DNS + Mailgun verification", state: "active", detail: "DNS is propagating; Mailgun is re-checking." };
 
   const readyCount = i.mailboxReadiness.filter((r) => r === "ready").length;
+  const sandboxCount = i.mailboxReadiness.filter((r) => r === "sandbox").length;
   let mailboxes: PipelineStage;
   if (dns.state !== "done") mailboxes = { key: "mailboxes", label: "Mailboxes ready to send", state: "pending" };
+  else if (sandboxCount > 0)
+    // A sandbox domain reports as send-capable on Mailgun's side but only delivers to a short list of
+    // pre-approved test addresses — treat it as a failure, not "done", so it can't be mistaken for a
+    // working mailbox and used for real campaign sends.
+    mailboxes = {
+      key: "mailboxes",
+      label: "Mailboxes ready to send",
+      state: "failed",
+      detail: "This Mailgun account is still on a sandbox domain — it can only deliver to pre-approved test addresses. Add a real domain in Mailgun before sending campaigns.",
+    };
   else if (readyCount > 0)
     mailboxes = { key: "mailboxes", label: "Mailboxes ready to send", state: "done", detail: `${readyCount} of ${i.mailboxReadiness.length} ready` };
   else mailboxes = { key: "mailboxes", label: "Mailboxes ready to send", state: "active", detail: i.mailboxReadiness.length ? "Mailbox domain is still verifying." : "Add a mailbox below." };

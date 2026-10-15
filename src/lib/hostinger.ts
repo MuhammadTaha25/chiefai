@@ -83,11 +83,10 @@ export async function getDomainCatalogItem(tld: string): Promise<{ itemId: strin
   return { itemId: oneYear.id, price: oneYear };
 }
 
-// Our margin on top of Hostinger's own cost for the domain — the client is
-// charged this, we pay Hostinger's (lower) first_period_price out of our own
-// account. Keep this the single source of truth so search display and
-// checkout charging can never drift apart.
-export const DOMAIN_MARKUP_MULTIPLIER = 1.3;
+// No margin on top of Hostinger's own cost — the client is charged exactly
+// what we pay Hostinger for the domain. Keep this the single source of truth
+// so search display and checkout charging can never drift apart.
+export const DOMAIN_MARKUP_MULTIPLIER = 1;
 
 /**
  * Hostinger's first_period_price is the actual first-year registration cost

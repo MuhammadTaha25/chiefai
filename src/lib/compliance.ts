@@ -11,6 +11,7 @@ const UNSUBSCRIBE_PATTERNS = [
   /remove me/i,
   /take me off/i,
   /stop email(?:ing)?/i,
+  /\bstop\b/i,
   /don'?t (?:contact|email) me/i,
   /do not (?:contact|email) me/i,
   /opt(?:\s|-)?out/i,
@@ -67,7 +68,7 @@ export function isAutomatedMessage(sender: string, messageHeadersJson: string | 
  * The opt-out is a reply keyword the inbound handler already detects deterministically (isUnsubscribeRequest).
  */
 export function withUnsubscribeFooter(body: string, opts: { company: string | null | undefined; postalAddress?: string | null }): string {
-  const lines = ['If you would rather not hear from us, just reply with "unsubscribe" and we will not email you again.'];
+  const lines = ['Not interested? Reply "STOP" and we will not email you again.'];
   const who = [opts.company?.trim(), opts.postalAddress?.trim()].filter(Boolean).join(" · ");
   if (who) lines.push(who);
   return [body.trimEnd(), "", "--", ...lines].join("\n");

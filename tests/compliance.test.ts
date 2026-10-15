@@ -32,9 +32,9 @@ test("a real person's reply is not treated as automated, even with broken header
 
 test("footer: opt-out line, company and postal address; works with and without an address", () => {
   const full = withUnsubscribeFooter("Hello.\n\n", { company: "Test Co", postalAddress: "1 Test St" });
-  assert.equal(full, 'Hello.\n\n--\nIf you would rather not hear from us, just reply with "unsubscribe" and we will not email you again.\nTest Co · 1 Test St');
+  assert.equal(full, 'Hello.\n\n--\nNot interested? Reply "STOP" and we will not email you again.\nTest Co · 1 Test St');
   const bare = withUnsubscribeFooter("Hello.", { company: null });
-  assert.ok(bare.includes('reply with "unsubscribe"'));
+  assert.ok(bare.includes('Reply "STOP"'));
   assert.ok(!bare.includes("·"));
   assert.ok(isUnsubscribeRequest(full.split("--")[1]), "the footer's own instruction is something the inbound handler understands");
 });

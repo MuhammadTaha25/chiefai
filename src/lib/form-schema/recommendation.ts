@@ -21,7 +21,11 @@ function firstNonEmpty(...vals: unknown[]): string {
 /** Deterministic synthesis of the lead-gen form into a plain-English target profile. Not a live AI call — just reflects the answers back clearly so the client can sanity-check before we search. */
 export function buildLeadRecommendation(v: FormValues): Recommendation {
   const rows: RecommendationRow[] = [
-    { label: "Industry", value: firstNonEmpty(v.target_industries, v.business_category) },
+    // business_category describes the CLIENT's own business, not the industry of the leads being
+    // searched for — falling back to it here used to show it under "Industry" whenever target_industries
+    // was left empty, wrongly implying the search would target companies like the client's own, when the
+    // actual search instead lets Gemini infer the target industry from "what you sell".
+    { label: "Industry", value: firstNonEmpty(v.target_industries, "Let AI decide based on what you sell") },
     { label: "Company size", value: firstNonEmpty(v.company_size, "Any size") },
     { label: "Revenue", value: firstNonEmpty(v.annual_revenue, "Any") },
     { label: "Location", value: firstNonEmpty(v.target_countries) },
@@ -31,7 +35,7 @@ export function buildLeadRecommendation(v: FormValues): Recommendation {
   ];
 
   const reasons: string[] = [];
-  if (v.target_industries || v.business_category) {
+  if (v.target_industries) {
     reasons.push("These industries closely match the product or service you described.");
   }
   if (v.company_size) {

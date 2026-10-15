@@ -39,7 +39,7 @@ test("sends one first email and records everything a follow-up will need", async
   const mail = S.mailer.sent[0];
   assert.equal(mail.to, w.leads[0].email);
   assert.ok(mail.from.startsWith("Test Co <"), "display name = the client's company");
-  assert.match(mail.text, /reply with "unsubscribe"/);
+  assert.match(mail.text, /Reply "STOP"/);
   assert.ok(mail.headers?.["List-Unsubscribe"]);
   assert.equal(mail.inReplyTo, undefined, "a first email is not a reply");
   assert.deepEqual(lintOutreachEmail({ subject: mail.subject, body: mail.text.split("\n--\n")[0] }), [], "passes the deliverability checks");

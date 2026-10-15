@@ -34,7 +34,7 @@ test("a due follow-up goes out from the SAME mailbox, in the SAME thread, with t
   assert.equal(mail.to, lead.email);
   assert.equal(mail.subject, "Faster follow-ups for agents", "same subject as the first email, not the AI's subject, and no Re:");
   assert.equal(mail.inReplyTo, "<first-1@mg.test>", "threaded onto the first email");
-  assert.match(mail.text, /reply with "unsubscribe"/);
+  assert.match(mail.text, /Reply "STOP"/);
   assert.match(mail.text, /Test Co · 1 Test Street, Testville/);
   assert.ok(mail.headers?.["List-Unsubscribe"]);
   const l = S.leadRow(id(lead));
