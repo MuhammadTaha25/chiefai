@@ -49,3 +49,26 @@ export function resolveFollowUpIntervalMs(criteria?: Record<string, unknown> | n
 export function resolveFirstFollowUpDelayMs(criteria?: Record<string, unknown> | null): number {
   return resolveFollowUpIntervalMs(criteria);
 }
+
+/**
+ * Where a lead is in its sequence, given the `follow_up_number` stored on it.
+ *
+ * `follow_up_number` counts the INITIAL email as 1 (every send path sets it to 1 on the first email), so it is NOT
+ * "follow-ups sent so far". This one helper keeps the cron's cap, touch number, status and email angle consistent:
+ *   - nextFollowUpNumber: the value stored on the lead after this send, and this email's touch_number (initial = touch 1)
+ *   - followUpIndex:      this email's position among FOLLOW-UPS only (1 = first follow-up)
+ *   - capped:             the client's follow-up allowance is already used up — send nothing
+ *   - isLast:             this send is the final follow-up allowed — schedule no further one
+ *   - status:             `follow_up_<followUpIndex>` (same meaning as the manual send route)
+ */
+export function planFollowUp(storedFollowUpNumber: number | null | undefined, maxFollowUps: number) {
+  const nextFollowUpNumber = (storedFollowUpNumber ?? 0) + 1;
+  const followUpIndex = nextFollowUpNumber - 1;
+  return {
+    nextFollowUpNumber,
+    followUpIndex,
+    capped: followUpIndex > maxFollowUps,
+    isLast: followUpIndex >= maxFollowUps,
+    status: `follow_up_${Math.min(followUpIndex, 10)}`,
+  };
+}

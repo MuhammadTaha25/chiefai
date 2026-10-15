@@ -17,6 +17,7 @@ import { isValidTimeZone, localClock } from "@/lib/social-schedule";
 import { resolveDailySendCap } from "@/lib/send-cap";
 import { effectiveDailyLimit } from "@/lib/mailbox-readiness";
 import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
+import { startOfLocalDay } from "@/lib/company-facts";
 
 // Default daily cap lives in send-cap.ts (DEFAULT_DAILY_INITIAL_SEND_LIMIT = 4); a tenant can override it with clients.daily_send_cap.
 // The delay before the first follow-up check comes from follow-up-config.ts
@@ -44,9 +45,6 @@ interface EligibleLead {
 export async function sendBatchForClient(clientId: string) {
   const admin = createAdminClient();
 
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-
   const campaignMonth = (() => {
     const now = new Date();
     return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
@@ -62,6 +60,33 @@ export async function sendBatchForClient(clientId: string) {
   if (!campaign || campaign.status !== "active") {
     return { clientId, result: "skipped", detail: "no active campaign this month" };
   }
+
+  // Sending window and timezone: campaign-level overrides take precedence over client-level defaults.
+  // The default window 08:00-24:00 applies in the resolved timezone, never a server default. Without
+  // a valid timezone nothing is sent. Mailboxes run in blocks: mailbox i (in creation order) owns
+  // block i of the day. Only the mailbox whose block is running now may send.
+  // Resolved BEFORE the daily-cap count below, because "today" starts at midnight in the CLIENT's timezone, not the
+  // server's (a server-clock midnight would reset the cap in the middle of the send window for clients whose
+  // window crosses UTC midnight, allowing roughly double the intended daily sends).
+  const [{ data: clientRow }, { data: campaignRow }] = await Promise.all([
+    admin.from("clients").select("*").eq("id", clientId).maybeSingle(),
+    admin.from("campaigns")
+      .select("send_window_start, send_window_end, timezone, template_subject, template_body")
+      .eq("id", campaign.id)
+      .maybeSingle<{ send_window_start: string | null; send_window_end: string | null; timezone: string | null; template_subject: string | null; template_body: string | null }>(),
+  ]);
+  // Campaign overrides fall back to client-level values
+  const resolvedTimezone = campaignRow?.timezone ?? clientRow?.timezone;
+  const resolvedWindowStart = campaignRow?.send_window_start ?? clientRow?.outreach_send_start;
+  const resolvedWindowEnd = campaignRow?.send_window_end ?? clientRow?.outreach_send_end;
+  const resolvedTemplateSubject = campaignRow?.template_subject ?? clientRow?.outreach_template_subject;
+  const resolvedTemplateBody = campaignRow?.template_body ?? clientRow?.outreach_template_body;
+
+  if (!isValidTimeZone(resolvedTimezone)) {
+    return { clientId, campaignId: campaign.id, result: "skipped", detail: "client timezone not set: choose it in the sending window settings" };
+  }
+  const sendTz = resolvedTimezone;
+  const startOfToday = startOfLocalDay(sendTz);
 
   // Idempotent daily cap: counts sends already recorded today, so running
   // this route twice in one day (retry, overlapping cron) never sends more
@@ -92,28 +117,6 @@ export async function sendBatchForClient(clientId: string) {
     return { clientId, campaignId: campaign.id, result: "skipped", detail: "daily limit already reached" };
   }
 
-  // Sending window and timezone: campaign-level overrides take precedence over client-level defaults.
-  // The default window 08:00-24:00 applies in the resolved timezone, never a server default. Without
-  // a valid timezone nothing is sent. Mailboxes run in blocks: mailbox i (in creation order) owns
-  // block i of the day. Only the mailbox whose block is running now may send.
-  const [{ data: clientRow }, { data: campaignRow }] = await Promise.all([
-    admin.from("clients").select("*").eq("id", clientId).maybeSingle(),
-    admin.from("campaigns")
-      .select("send_window_start, send_window_end, timezone, template_subject, template_body")
-      .eq("id", campaign.id)
-      .maybeSingle<{ send_window_start: string | null; send_window_end: string | null; timezone: string | null; template_subject: string | null; template_body: string | null }>(),
-  ]);
-  // Campaign overrides fall back to client-level values
-  const resolvedTimezone = campaignRow?.timezone ?? clientRow?.timezone;
-  const resolvedWindowStart = campaignRow?.send_window_start ?? clientRow?.outreach_send_start;
-  const resolvedWindowEnd = campaignRow?.send_window_end ?? clientRow?.outreach_send_end;
-  const resolvedTemplateSubject = campaignRow?.template_subject ?? clientRow?.outreach_template_subject;
-  const resolvedTemplateBody = campaignRow?.template_body ?? clientRow?.outreach_template_body;
-
-  if (!isValidTimeZone(resolvedTimezone)) {
-    return { clientId, campaignId: campaign.id, result: "skipped", detail: "client timezone not set: choose it in the sending window settings" };
-  }
-  const sendTz = resolvedTimezone;
   const sendWindow = resolveSendWindow(resolvedWindowStart, resolvedWindowEnd);
   const usingDefaultWindow = sendWindow === DEFAULT_SEND_WINDOW;
   const nowMinute = localClock(sendTz).minutes;
@@ -273,7 +276,7 @@ export async function sendBatchForClient(clientId: string) {
 
       // Try AIDA AI draft first; fall back to fixed template if it fails or fails the lint.
       // This gives each lead a personalised email while keeping deliverability as the hard backstop.
-      let fixedDraft = cleanOutreachEmail(
+      const fixedDraft = cleanOutreachEmail(
         buildTemplateEmail({
           firstName: isBusinessLead ? null : lead.name,
           leadCompany: lead.company || "your company",
