@@ -134,6 +134,14 @@ async function parseGeminiResponse<T>(res: Response): Promise<T> {
   }
 }
 
+/** Spam-filter rules shared by every cold-email prompt. They mirror the checks in email-quality.ts, which reject a draft that breaks them. */
+const SPAM_SAFE_RULES = `Spam-filter rules (a checker rejects any draft that breaks these, so follow them):
+- Never use: free, guarantee(d), act now, limited time, click here, buy now, 100%, risk-free, no obligation, winner, cash, urgent, double your, "just following up", "I hope this finds you", synergy, touch base, circle back, leverage.
+- No money talk (prices, discounts, "save", "profit", "income"), no hype (revolutionary, game-changing, amazing, exclusive offer, best-in-class), no numbers, percentages or hours-saved claims, no "clients report" claims.
+- No ALL-CAPS words, no exclamation marks, no emoji, no links, no attachments, plain text only.
+- Do not copy wording from earlier emails to this person; use fresh sentences.
+- Subject: under 50 characters, specific to them, no "Re:" and no clickbait.`;
+
 export interface AidaEmail {
   subject: string;
   body: string;
@@ -197,6 +205,8 @@ Voice & style:
 - Sign off casually: just the sender's first name or company name — no titles, no phone numbers
 - Never use: free, guarantee, act now, limited time, click here, buy now, 100%, risk-free, urgent, double your, cash, winner, "I wanted to reach out", "touch base", "circle back", "synergy"
 - Do not make up facts, statistics, or claim results you don't know
+
+${SPAM_SAFE_RULES}
 
 Respond with ONLY valid JSON: {"subject": string, "body": string}`;
 
@@ -326,7 +336,9 @@ ${untrusted(params.theirReply)}
 
 ${toneInstructions[params.sentiment]}
 
-Plain text only, no markdown. Respond with ONLY valid JSON matching exactly: {"subject": string, "body": string}`;
+Plain text only, no markdown. ${SPAM_SAFE_RULES}
+
+Respond with ONLY valid JSON matching exactly: {"subject": string, "body": string}`;
 
   return generateJson<AidaEmail>(prompt);
 }
@@ -437,6 +449,8 @@ Hard rules:
 - Subject line: any short placeholder — the system replaces it with the original thread's subject.
 - Do not invent facts, stats, testimonials or results not in the business context. Never write a number of hours, a percentage, or phrases like "clients report" / "customers say".
 - Keep a mini AIDA flow in 30-50 words: a fresh attention line, one benefit or problem, one soft question.
+
+${SPAM_SAFE_RULES}
 
 Respond with ONLY valid JSON matching exactly: {"subject": string, "body": string}`;
 
