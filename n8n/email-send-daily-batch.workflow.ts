@@ -46,7 +46,7 @@ const callSendBatch = node({
     name: 'POST /api/campaigns/send-daily-batch',
     parameters: {
       method: 'POST',
-      url: 'https://chiefai.vercel.app/api/campaigns/send-daily-batch',
+      url: 'https://infomistqa4827.online/api/campaigns/send-daily-batch',
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       options: {
@@ -79,7 +79,7 @@ const helpNote = sticky(
   '3. Name field: `Authorization`\n' +
   '4. Value field: `Bearer <your CRON_SECRET from Vercel env vars>`\n\n' +
   '**App URL:** Update the URL in the HTTP node if your domain differs from\n' +
-  '`chiefai.vercel.app`.',
+  '`infomistqa4827.online`.',
   [hourlySchedule, callSendBatch],
   { color: 3 },
 );

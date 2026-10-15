@@ -44,7 +44,7 @@ const callFollowUps = node({
     name: 'GET /api/cron/follow-ups',
     parameters: {
       method: 'GET',
-      url: 'https://chiefai.vercel.app/api/cron/follow-ups',
+      url: 'https://infomistqa4827.online/api/cron/follow-ups',
       authentication: 'genericCredentialType',
       genericAuthType: 'httpHeaderAuth',
       options: {
@@ -74,7 +74,7 @@ const helpNote = sticky(
   '**Required Vercel env var:** `FOLLOW_UP_CRON_ENABLED=true`\n\n' +
   '**Credential:** Same `ChiefAI Cron Secret` used by the send-daily-batch workflow.\n\n' +
   '**App URL:** Update the URL in the HTTP node if your domain differs from\n' +
-  '`chiefai.vercel.app`.',
+  '`infomistqa4827.online`.',
   [hourlySchedule, callFollowUps],
   { color: 5 },
 );
