@@ -27,6 +27,9 @@ test("leadMeetingEventName uses the tenant's company and topic, never a generic 
 
 test("mailbox health: low volume stays eligible, high bounce/complaint rates are paused", () => {
   assert.equal(isMailboxHealthy({ sent: 5, bounced: 2, complained: 0 }), true);
+  assert.equal(isMailboxHealthy({ sent: 5, bounced: 3, complained: 0 }), false); // early red flag
+  assert.equal(isMailboxHealthy({ sent: 100, bounced: 5, complained: 0 }), false); // above 4%
+  assert.equal(isMailboxHealthy({ sent: 100, bounced: 4, complained: 0 }), true);
   assert.equal(isMailboxHealthy({ sent: 5, bounced: 0, complained: 2 }), false);
   assert.equal(isMailboxHealthy({ sent: 100, bounced: 3, complained: 0 }), true);
   assert.equal(isMailboxHealthy({ sent: 100, bounced: 12, complained: 0 }), false);

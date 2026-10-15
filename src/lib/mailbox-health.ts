@@ -12,8 +12,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export const HEALTH_WINDOW_DAYS = 7;
 /** Below this many sends there is not enough data to judge; the mailbox stays eligible. */
 export const MIN_SENDS_TO_JUDGE = 15;
-export const MAX_BOUNCE_RATE = 0.08;
-export const MAX_COMPLAINT_RATE = 0.003;
+/** Stricter than Mailgun's own limits (5% bounces, 0.08% complaints) so we pause before the provider acts. */
+export const MAX_BOUNCE_RATE = 0.04;
+export const MAX_COMPLAINT_RATE = 0.001;
+/** Even with too few sends for a rate, this many bounces this early means the list or domain is bad. */
+export const EARLY_BOUNCE_LIMIT = 3;
 
 export interface MailboxStats {
   sent: number;
@@ -24,7 +27,7 @@ export interface MailboxStats {
 export function isMailboxHealthy(s: MailboxStats): boolean {
   if (s.sent < MIN_SENDS_TO_JUDGE) {
     // Too little data for a rate, but two spam complaints this early is already a red flag.
-    return s.complained < 2;
+    return s.complained < 2 && s.bounced < EARLY_BOUNCE_LIMIT;
   }
   return s.bounced / s.sent <= MAX_BOUNCE_RATE && s.complained / s.sent <= MAX_COMPLAINT_RATE;
 }
