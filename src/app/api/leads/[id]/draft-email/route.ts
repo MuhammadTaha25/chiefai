@@ -53,7 +53,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!forceAi && clientRow?.outreach_template_subject && clientRow?.outreach_template_body) {
     const custom = cleanOutreachEmail(
       renderCustomTemplate(clientRow.outreach_template_subject, clientRow.outreach_template_body, {
-        first_name: lead.name,
+        // Same rule as the automatic sender: a directory lead's "name" is its company name, so greet generically.
+        first_name: !lead.job_title || (lead.name ?? "").trim().toLowerCase() === (lead.company ?? "").trim().toLowerCase() ? null : lead.name,
         company: lead.company,
         industry: null,
         job_title: lead.job_title ?? null,

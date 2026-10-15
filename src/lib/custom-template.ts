@@ -39,7 +39,11 @@ function tidy(v: string | null | undefined): string {
 }
 
 export function renderCustomTemplate(subject: string, body: string, values: TemplateValues): { subject: string; body: string } {
-  const pick = (k: TemplateVariable): string => tidy(values[k]) || FALLBACK[k];
+  // {first_name} is the FIRST word of whatever name we hold ("Sam Agent" -> "Sam"), the same rule the fixed template uses.
+  const pick = (k: TemplateVariable): string => {
+    const v = tidy(values[k]);
+    return (k === "first_name" ? v.split(" ")[0] : v) || FALLBACK[k];
+  };
   const fill = (text: string) =>
     text.replace(TOKEN, (whole, key: string) =>
       (TEMPLATE_VARIABLES as readonly string[]).includes(key) ? pick(key as TemplateVariable) : whole

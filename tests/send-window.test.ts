@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { RECOMMENDED_WINDOWS, MIN_GAP_MINUTES, FLOOR_GAP_MINUTES, planSendsForDay, shiftWindows, formatMinute, buildDynamicPlan } from "../src/lib/send-window.ts";
+import { RECOMMENDED_WINDOWS, MIN_GAP_MINUTES, FLOOR_GAP_MINUTES, JITTER_FRACTION, planSendsForDay, shiftWindows, formatMinute, buildDynamicPlan } from "../src/lib/send-window.ts";
 
 test("recommended windows: 08-12, 14-16, 18-20 are the default", () => {
   assert.deepEqual(RECOMMENDED_WINDOWS.map((w) => [formatMinute(w.startMin), formatMinute(w.endMin)]), [["08:00", "12:00"], ["14:00", "16:00"], ["18:00", "20:00"]]);
@@ -26,7 +26,10 @@ test("one mailbox per window, round-robin, and each window's sends are spaced by
   assert.equal(byMailbox("C"), 8);
   for (let i = 1; i < plan.length; i++) {
     const sameWindow = RECOMMENDED_WINDOWS.some((w) => plan[i].minute >= w.startMin && plan[i - 1].minute >= w.startMin && plan[i].minute < w.endMin && plan[i - 1].minute < w.endMin);
-    if (sameWindow) assert.ok(plan[i].minute - plan[i - 1].minute >= MIN_GAP_MINUTES);
+    // Send times are deliberately jittered by up to +-30% of the spacing so they never repeat exactly; two neighbours can
+    // therefore end up closer than the nominal gap, but never closer than the nominal gap minus both shifts.
+    const worstCase = MIN_GAP_MINUTES - 2 * Math.floor(MIN_GAP_MINUTES * JITTER_FRACTION);
+    if (sameWindow) assert.ok(plan[i].minute - plan[i - 1].minute >= Math.max(FLOOR_GAP_MINUTES, worstCase), `gap ${plan[i].minute - plan[i - 1].minute}`);
   }
   assert.ok(plan.every((p) => RECOMMENDED_WINDOWS.some((w) => p.minute >= w.startMin && p.minute < w.endMin)));
 });

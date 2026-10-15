@@ -35,10 +35,11 @@ test("mailbox health: low volume stays eligible, high bounce/complaint rates are
 
 import { resolveDailySendCap } from "../src/lib/send-cap.ts";
 
-test("daily cap: no override keeps the historical 4/day for existing tenants", () => {
-  assert.equal(resolveDailySendCap(null, 90), 4);
+test("daily cap: with no override the mailboxes' combined capacity is the cap; with no mailboxes the historical 4/day", () => {
+  assert.equal(resolveDailySendCap(null, 90), 90);
+  assert.equal(resolveDailySendCap(0, 90), 90);
   assert.equal(resolveDailySendCap(undefined, 0), 4);
-  assert.equal(resolveDailySendCap(0, 90), 4);
+  assert.equal(resolveDailySendCap(null, 0), 4);
 });
 
 test("daily cap: override is limited by what the tenant's mailboxes can send (warmup-aware)", () => {

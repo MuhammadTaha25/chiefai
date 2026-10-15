@@ -19,3 +19,9 @@ test("sample values render a complete email", () => {
   const out = renderCustomTemplate("Quick question about {company}", "Hi {first_name}, {industry} team?", SAMPLE_VALUES);
   assert.equal(out.body, "Hi Sam, dental care team?");
 });
+
+test("{first_name} is only the first word of the name (never 'Hi Sam Agent,')", () => {
+  const out = renderCustomTemplate("Hi {first_name}", "Hi {first_name}, hello.", { first_name: "  Sam   Agent " });
+  assert.equal(out.subject, "Hi Sam");
+  assert.match(out.body, /^Hi Sam, hello\./);
+});
