@@ -332,3 +332,24 @@ test("oldest-due follow-ups are served first", async () => {
   assert.equal(r.results[0].leadId, id(early));
   assert.equal(r.results[1].leadId, id(late));
 });
+
+// ------------------------------------------------------------------ one "today" for every limit
+test("the mailbox's daily limit resets at the CLIENT's midnight, not the server's", async () => {
+  const client = S.seedClient({ timezone: "Asia/Karachi" }); // UTC+5
+  const cid = id(client);
+  S.seedJob(cid);
+  const mb = S.seedMailbox(cid, { daily_send_limit: 3, created_at: new Date(S.T0 - 6 * S.DAY).toISOString() });
+  const fresh = S.seedLead(cid);
+  // 23:50 in Karachi on 14 Oct (= 18:50 UTC): the three allowed sends for that Karachi day are already used.
+  const lateEvening = Date.UTC(2026, 9, 14, 18, 50);
+  for (let i = 0; i < 3; i++) {
+    S.db.rows("outreach_log").push({ id: S.uid("log"), client_id: cid, lead_id: S.uid("old"), mailbox_id: id(mb), touch_number: 1, subject: "x", body: "y", provider_message_id: S.uid("<m"), sent_at: new Date(lateEvening - i * S.MIN).toISOString() });
+  }
+  S.setClock(lateEvening + 5 * S.MIN);
+  const blocked = await app.readiness.reserveMailboxSlot(S.db as never, cid, id(fresh), { touch_number: 1 }, { mailboxId: id(mb) });
+  assert.equal(blocked.ok, false, "still the same Karachi day");
+  // 00:05 in Karachi on 15 Oct (= 19:05 UTC): a new day for this client, although it is still 14 Oct in UTC.
+  S.setClock(Date.UTC(2026, 9, 14, 19, 5));
+  const fresh2 = await app.readiness.reserveMailboxSlot(S.db as never, cid, id(fresh), { touch_number: 1 }, { mailboxId: id(mb) });
+  assert.equal(fresh2.ok, true, "the limit reset at the client's midnight");
+});

@@ -3,9 +3,9 @@
  * is only about VOLUME: a new mailbox starts small and ramps smoothly, so it never looks like a spam blast.
  *
  * EXPONENTIAL RAMP (replaces abrupt weekly jumps):
- *   V(d) = min(WARMUP_CAP, floor(4 + 46 × (1 − e^(−d/18))))
+ *   V(d) = min(WARMUP_CAP, floor(4 + 46 × (1 − e^(−d/30))))
  *
- *   d=0  →  4   d=7  →  ~16   d=14 →  ~25   d=21 →  ~29   d=28+ → 30
+ *   d=0  →  4   d=7  →  13   d=14 →  21   d=21 →  27   d=25+ → 30  (full volume in about 3.5 weeks)
  *
  * The curve starts conservatively, accelerates through the critical first-two-weeks
  * reputation-building period, then flattens near the cap — matching how ESPs
@@ -25,7 +25,7 @@ export const WARMUP_CAP = 30;
  */
 export function coldLimitForAge(ageDays: number): number {
   const d = Math.max(0, ageDays);
-  return Math.min(WARMUP_CAP, Math.floor(4 + 46 * (1 - Math.exp(-d / 18))));
+  return Math.min(WARMUP_CAP, Math.floor(4 + 46 * (1 - Math.exp(-d / 30))));
 }
 
 /**

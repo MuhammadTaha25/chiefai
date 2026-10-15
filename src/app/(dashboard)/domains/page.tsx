@@ -1,5 +1,5 @@
 import { headers } from "next/headers";
-import { describeMailboxLimit } from "@/lib/mailbox-readiness";
+import { describeMailboxLimit, startOfSendDay } from "@/lib/mailbox-readiness";
 import { resolveAppOrigin } from "@/lib/app-url";
 import { getCurrentClient } from "@/lib/get-current-client";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -73,8 +73,9 @@ export default async function DomainsPage(props: {
     .order("created_at", { ascending: false })
     .returns<{ domain: string }[]>();
 
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
+  // "Sent today" uses the client's own midnight, the same boundary sending uses for the mailbox limit and the daily cap.
+  const { data: tzRow } = await supabase.from("clients").select("timezone").maybeSingle<{ timezone: string | null }>();
+  const startOfToday = new Date(startOfSendDay(tzRow?.timezone));
   const startOfMonth = new Date(startOfToday.getFullYear(), startOfToday.getMonth(), 1);
 
   // Follow-ups never switch mailbox, so one that is overdue for more than an hour is waiting on ITS original

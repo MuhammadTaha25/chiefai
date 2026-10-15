@@ -298,9 +298,9 @@ test("with two mailboxes only the one whose block is running sends; breaks and o
   const w = world({ mailboxes: 2, leads: 6 });
   await send(w.cid);
   assert.ok(S.mailer.sent[0].from.includes(w.mailboxes[0].address as string), "first block = first mailbox");
-  S.setClock(Date.UTC(2026, 9, 14, 14, 0)); // block 1 (08:00-13:45) is over, block 2 starts 14:45: inside the 1h break
+  S.setClock(Date.UTC(2026, 9, 14, 12, 45)); // two 10-day-old mailboxes allow 17/day each: block 1 is 08:00-12:15, block 2 starts 13:15, so this is the 1h break
   assert.match(((await send(w.cid)) as Sent).detail!, /not inside a mailbox block/);
-  S.setClock(Date.UTC(2026, 9, 14, 15, 0)); // block 2
+  S.setClock(Date.UTC(2026, 9, 14, 14, 0)); // block 2
   await send(w.cid);
   assert.ok(S.mailer.sent[1].from.includes(w.mailboxes[1].address as string), "second block = second mailbox");
   assert.equal(S.mailer.sent.length, 2);

@@ -101,7 +101,9 @@ export default function DomainMailboxList({ mailboxes }: { mailboxes: MailboxRow
                       ? `Held by the limit saved on this mailbox (${m.configured_limit}); warm-up would allow ${m.warmup_allows}`
                       : m.limited_by === "warm-up"
                         ? `Held by warm-up; the saved limit is ${m.configured_limit}`
-                        : "Fully warmed up"}
+                        : m.configured_limit > 0 && m.configured_limit < m.daily_send_limit
+                          ? `Fully warmed up: sends up to ${m.daily_send_limit}/day. The saved limit (${m.configured_limit}) only applies while warming up`
+                          : "Fully warmed up"}
                   </div>
                 </td>
                 <td className="px-4 py-3 text-zinc-500">

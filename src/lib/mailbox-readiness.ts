@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getUnhealthyMailboxIds } from "@/lib/mailbox-health";
 import { getMailboxReadiness } from "@/lib/mailgun";
 import { effectiveDailyLimit } from "@/lib/warmup-schedule";
+import { startOfLocalDay } from "@/lib/company-facts";
 import { followUpsPinnedTo, newEmailFits, originalMailboxByLead } from "@/lib/follow-up-capacity";
 
 /**
@@ -49,11 +50,32 @@ export async function pickReadyMailbox(
   return fallback;
 }
 
-/** Start of the current day: the same boundary the Domains page uses for "sent today". */
-export function startOfSendDay(): string {
+/**
+ * Start of the current sending day, as an ISO time. With the client's timezone it is that client's own midnight, the same
+ * boundary send-batch uses for the first-email cap and the Domains page uses for "sent today", so every limit resets at
+ * the same moment. Without a valid timezone it falls back to the server's midnight.
+ */
+export function startOfSendDay(timeZone?: string | null): string {
+  if (timeZone) {
+    try {
+      new Intl.DateTimeFormat("en", { timeZone });
+      return startOfLocalDay(timeZone).toISOString();
+    } catch {
+      // invalid timezone: fall through to the server clock
+    }
+  }
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return d.toISOString();
+}
+
+async function clientTimeZone(admin: SupabaseClient, clientId: string): Promise<string | null> {
+  try {
+    const { data } = await admin.from("clients").select("timezone").eq("id", clientId).maybeSingle<{ timezone: string | null }>();
+    return data?.timezone ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export { WARMUP_CAP, coldLimitForAge, effectiveDailyLimit, describeMailboxLimit } from "@/lib/warmup-schedule";
@@ -66,13 +88,13 @@ export type MailboxReservation =
  * Sales sends today for one mailbox. touch_number 0 (auto-replies to prospects) is excluded: replies are
  * not outbound prospecting, and the limit exists to protect cold-outreach volume.
  */
-async function salesSendsToday(admin: SupabaseClient, mailboxId: string): Promise<number> {
+async function salesSendsToday(admin: SupabaseClient, mailboxId: string, since: string): Promise<number> {
   const { count } = await admin
     .from("outreach_log")
     .select("id", { count: "exact", head: true })
     .eq("mailbox_id", mailboxId)
     .gte("touch_number", 1)
-    .gte("sent_at", startOfSendDay());
+    .gte("sent_at", since);
   return count ?? 0;
 }
 
@@ -81,9 +103,9 @@ async function salesSendsToday(admin: SupabaseClient, mailboxId: string): Promis
  * New first emails leave room for them (see follow-up-capacity.ts). Any lookup problem counts as 0 so a database
  * hiccup can never stop sending.
  */
-async function dueFollowUpsPinnedTo(admin: SupabaseClient, clientId: string, mailboxId: string): Promise<number> {
+async function dueFollowUpsPinnedTo(admin: SupabaseClient, clientId: string, mailboxId: string, dayStart: string): Promise<number> {
   try {
-    const endOfDay = new Date(new Date(startOfSendDay()).getTime() + 24 * 60 * 60 * 1000).toISOString();
+    const endOfDay = new Date(new Date(dayStart).getTime() + 24 * 60 * 60 * 1000).toISOString();
     const { data: due } = await admin
       .from("leads")
       .select("id")
@@ -133,8 +155,10 @@ export async function reserveMailboxSlot(
   clientId: string,
   leadId: string,
   row: { touch_number: number; campaign_id?: string | null; subject?: string; body?: string },
-  options?: { mailboxId?: string }
+  options?: { mailboxId?: string; timeZone?: string | null }
 ): Promise<MailboxReservation> {
+  // "Today" is the client's own day, so the mailbox limit and the first-email cap reset at the same moment.
+  const dayStart = startOfSendDay(options?.timeZone ?? (await clientTimeZone(admin, clientId)));
   const { data: allMailboxes } = await admin
     .from("mailboxes")
     .select("id, address, daily_send_limit, created_at")
@@ -169,7 +193,7 @@ export async function reserveMailboxSlot(
       skippedUnhealthy = true;
       continue;
     }
-    readyMailboxes.push({ m, used: await salesSendsToday(admin, m.id) });
+    readyMailboxes.push({ m, used: await salesSendsToday(admin, m.id, dayStart) });
   }
   const ordered = readyMailboxes
     .sort((x, y) => Number(y.m.id === preferredId) - Number(x.m.id === preferredId) || x.used - y.used || Math.random() - 0.5)
@@ -181,12 +205,12 @@ export async function reserveMailboxSlot(
     const limit = effectiveDailyLimit(m, Date.now(), !unhealthy.has(m.id));
     // A NEW first email (touch 1) only gets the slots left after the follow-ups still due today that are pinned
     // to this mailbox, so follow-ups are not starved by new sends. Follow-ups themselves use the full limit.
-    const reservedForFollowUps = row.touch_number === 1 ? await dueFollowUpsPinnedTo(admin, clientId, m.id) : 0;
+    const reservedForFollowUps = row.touch_number === 1 ? await dueFollowUpsPinnedTo(admin, clientId, m.id, dayStart) : 0;
     // Contention can make every racing request back off at once (safe, but nobody wins); a short random
     // jitter and retry lets one of them through. The limit is re-checked on every attempt.
     for (let attempt = 0; attempt < 4; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, 40 + Math.random() * 160));
-    const usedNow = await salesSendsToday(admin, m.id);
+    const usedNow = await salesSendsToday(admin, m.id, dayStart);
     if (usedNow >= limit) break;
     if (reservedForFollowUps > 0 && !newEmailFits(usedNow, reservedForFollowUps, limit)) break;
 
@@ -206,7 +230,7 @@ export async function reserveMailboxSlot(
       .single<{ id: string }>();
     if (error || !reserved) break;
 
-    if ((await salesSendsToday(admin, m.id)) > limit) {
+    if ((await salesSendsToday(admin, m.id, dayStart)) > limit) {
       await admin.from("outreach_log").delete().eq("id", reserved.id);
       continue;
     }

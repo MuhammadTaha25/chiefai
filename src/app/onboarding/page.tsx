@@ -215,7 +215,7 @@ export default function OnboardingPage() {
                     rows={7}
                     value={templateBody}
                     onChange={(e) => { setTemplateBody(e.target.value); setError(null); }}
-                    placeholder={`Hi {first_name},\n\nI came across {company} and wanted to reach out...\n\nBest,\n{sender_company}`}
+                    placeholder={`Hi {first_name},\n\nQuick note about {company}...\n\nBest,\n{sender_company}`}
                     className="mt-1.5 w-full rounded-md border border-strong bg-raised px-3 py-2 type-body text-ink outline-none focus-visible:outline-2 focus-visible:outline-ring resize-none font-mono text-xs"
                   />
                   <p className="mt-1 type-caption text-ink-tertiary text-right">{templateBody.length}/2000</p>

@@ -10,7 +10,7 @@ import {
 
 function fakeDeps(overrides: Partial<VerificationDeps> = {}): VerificationDeps & { rows: Map<string, VerificationRow> } {
   const rows = new Map<string, VerificationRow>();
-  let clock = new Date("2026-01-01T00:00:00Z");
+  const clock = new Date("2026-01-01T00:00:00Z");
   return {
     rows,
     async getLatestForEmail(email) {
