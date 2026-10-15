@@ -160,3 +160,13 @@ export function lintOutreachEmail(d: Draft, opts: { firstTouch?: boolean; earlie
   if (letters.length > 40 && letters.replace(/[^A-Z]/g, "").length / letters.length > 0.3) issues.push("too much capitalisation");
   return issues;
 }
+
+/**
+ * The company name is the email's display name and footer. A one/two-letter or throwaway name ("a", "test") looks
+ * like a throwaway sender to Gmail and to the reader, so sending waits until the client saves their real name.
+ */
+export function isPlaceholderCompanyName(name: string | null | undefined): boolean {
+  const n = (name ?? "").trim();
+  if (n.length < 3) return true;
+  return /^(test|testing|demo|company|my company|n\/?a|none|null|asdf+|xxx+|abc|sample|untitled)$/i.test(n);
+}
