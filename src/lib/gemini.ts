@@ -140,7 +140,8 @@ const SPAM_SAFE_RULES = `Spam-filter rules (a checker rejects any draft that bre
 - No money talk (prices, discounts, "save", "profit", "income"), no hype (revolutionary, game-changing, amazing, exclusive offer, best-in-class), no numbers, percentages or hours-saved claims, no "clients report" claims.
 - No ALL-CAPS words, no exclamation marks, no emoji, no links, no attachments, plain text only.
 - Do not copy wording from earlier emails to this person; use fresh sentences.
-- Subject: under 50 characters, specific to them, no "Re:" and no clickbait.`;
+- Subject: under 50 characters, specific to them, no "Re:" and no clickbait. The subject must say what the email is actually about.
+- End with exactly ONE question under 12 words that is easy to answer with a word or two.`;
 
 export interface AidaEmail {
   subject: string;
@@ -193,7 +194,7 @@ AIDA structure (but don't make it obvious — it should flow naturally):
 - Attention: open with something specific to them (their business type, location, or what they likely deal with day-to-day) — NOT a generic opener
 - Interest: one sentence on a real challenge businesses like theirs typically face
 - Desire: one sentence on how ${params.senderCompany} can help, naming ONE concrete outcome the reader can picture (taken only from the offer text above, e.g. "every enquiry answered within minutes") — plain words, no hype, no numbers you were not given
-- Action: one soft question (not a demand) as the CTA
+- Action: ONE short, easy-to-answer question (yes/no style, under 12 words, not a demand) as the CTA
 
 Voice & style:
 - Write like a real person emailing another real person — short, direct, no corporate speak
@@ -395,9 +396,9 @@ Respond with ONLY valid JSON matching exactly: {"topic": string}`;
  */
 // Each follow-up uses a different angle so the sequence never feels copy-pasted.
 const FOLLOW_UP_ANGLES: Record<number, string> = {
-  1: "Attention: one brief, specific observation about their business type or role. Interest: the everyday problem that observation points to. Action: one easy yes/no question about whether it is a problem for them.",
-  2: "Attention: a new opening that is NOT the first email's. Desire: one concrete outcome a business like theirs could get from what we sell (use ONLY what the offer text says; never state a number, percentage or customer result). Action: one soft question.",
-  3: "Try a completely different angle. Attention: ask about their current process or challenge. Interest: one sentence on why that matters. Action: one genuine, low-pressure question — no sales language.",
+  1: "Attention: one brief, specific observation about their business type or role. Interest: the everyday problem that observation points to. Action: one easy yes/no question (under 12 words) about whether it is a problem for them.",
+  2: "Attention: a new opening that is NOT the first email's. Desire: one concrete outcome a business like theirs could get from what we sell (use ONLY what the offer text says; never state a number, percentage or customer result). Action: one short yes/no question, under 12 words.",
+  3: "Try a completely different angle. Attention: ask about their current process or challenge. Interest: one sentence on why that matters. Action: one genuine, low-pressure question under 12 words — no sales language.",
   4: "Very short 'closing the loop' note — say you don't want to keep emailing if it's not relevant, and ask if now is a bad time or if it would be better to reconnect later.",
   5: "Mention one specific thing that recently changed in their industry (use only what is in the business context; if nothing specific, mention that you're expanding in their space) and tie it to why you're reaching out.",
 };
