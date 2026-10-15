@@ -43,3 +43,12 @@ test("List-Unsubscribe header and the confirmation message", () => {
   assert.deepEqual(unsubscribeHeaders("a@b.test"), { "List-Unsubscribe": "<mailto:a@b.test?subject=unsubscribe>" });
   assert.match(unsubscribeConfirmation("Test Co").body, /Test Co/);
 });
+
+test("lint rejects invented statistics and customer claims", async () => {
+  const { lintOutreachEmail } = await import("../src/lib/email-quality.ts");
+  const base = "Hi Sam, most agencies lose warm buyers when replies come late. We set up automatic replies so every enquiry gets an answer within minutes. Would a quick chat next week help?";
+  assert.deepEqual(lintOutreachEmail({ subject: "quick idea", body: base }, { firstTouch: false }), []);
+  assert.ok(lintOutreachEmail({ subject: "quick idea", body: "Hi Sam, clients report saving 10+ hours per week with our automations for agencies like yours. Worth a chat?" }, { firstTouch: false }).length >= 1);
+  assert.ok(lintOutreachEmail({ subject: "quick idea", body: base + " We lift replies by 40%." }, { firstTouch: false }).includes("invented statistic"));
+  assert.deepEqual(lintOutreachEmail({ subject: "quick idea", body: base + " Open to a 15-minute call?" }, { firstTouch: false }), []);
+});

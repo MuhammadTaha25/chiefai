@@ -79,6 +79,9 @@ export function lintOutreachEmail(d: Draft, opts: { firstTouch?: boolean } = { f
     if (re.test(text)) issues.push(`spam trigger: "${phrase}"`);
   }
   if (opts.firstTouch !== false && URL_RE.test(body)) issues.push("link in first email");
+  // Invented proof: statistics and "clients report" style claims the sender never supplied.
+  if (/\b\d+(\.\d+)?\s*\+?\s*(%|percent\b|hours?\s+(per|a|each|every)\b|x\s+(more|faster|better))/i.test(body)) issues.push("invented statistic");
+  if (/\b(clients|customers|users|businesses)\s+(report|say|tell us|see|have seen)\b/i.test(body)) issues.push("invented customer claim");
   if ((body.match(/!/g) ?? []).length > 1) issues.push("more than one exclamation mark");
   const letters = body.replace(/[^A-Za-z]/g, "");
   if (letters.length > 40 && letters.replace(/[^A-Z]/g, "").length / letters.length > 0.3) issues.push("too much capitalisation");

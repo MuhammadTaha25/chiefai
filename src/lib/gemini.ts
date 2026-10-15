@@ -184,7 +184,7 @@ Write the email body and subject line following these principles:
 AIDA structure (but don't make it obvious — it should flow naturally):
 - Attention: open with something specific to them (their business type, location, or what they likely deal with day-to-day) — NOT a generic opener
 - Interest: one sentence on a real challenge businesses like theirs typically face
-- Desire: one sentence on how ${params.senderCompany} can help — plain words, no hype
+- Desire: one sentence on how ${params.senderCompany} can help, naming ONE concrete outcome the reader can picture (taken only from the offer text above, e.g. "every enquiry answered within minutes") — plain words, no hype, no numbers you were not given
 - Action: one soft question (not a demand) as the CTA
 
 Voice & style:
@@ -383,9 +383,9 @@ Respond with ONLY valid JSON matching exactly: {"topic": string}`;
  */
 // Each follow-up uses a different angle so the sequence never feels copy-pasted.
 const FOLLOW_UP_ANGLES: Record<number, string> = {
-  1: "Open with a very brief, specific observation about their industry or role — one sentence that shows you did your homework. Then ask a single, easy yes/no question about whether the problem exists for them.",
-  2: "Lead with a concrete, real-world outcome or use-case from a business similar to theirs (use ONLY what the business context says; if there is no proof, skip it and share a brief 'what-if' framing instead). Keep it to 2 sentences + 1 question.",
-  3: "Try a completely different angle: ask about their current process or challenge rather than pitching. One genuine question — no sales language.",
+  1: "Attention: one brief, specific observation about their business type or role. Interest: the everyday problem that observation points to. Action: one easy yes/no question about whether it is a problem for them.",
+  2: "Attention: a new opening that is NOT the first email's. Desire: one concrete outcome a business like theirs could get from what we sell (use ONLY what the offer text says; never state a number, percentage or customer result). Action: one soft question.",
+  3: "Try a completely different angle. Attention: ask about their current process or challenge. Interest: one sentence on why that matters. Action: one genuine, low-pressure question — no sales language.",
   4: "Very short 'closing the loop' note — say you don't want to keep emailing if it's not relevant, and ask if now is a bad time or if it would be better to reconnect later.",
   5: "Mention one specific thing that recently changed in their industry (use only what is in the business context; if nothing specific, mention that you're expanding in their space) and tie it to why you're reaching out.",
 };
@@ -435,7 +435,8 @@ Hard rules:
 - No guilt-tripping. No fake urgency. No hype words: never write free, guaranteed, urgent, double or 100%.
 - No links, no markdown, plain text only. One question at most.
 - Subject line: any short placeholder — the system replaces it with the original thread's subject.
-- Do not invent facts, stats, testimonials or results not in the business context.
+- Do not invent facts, stats, testimonials or results not in the business context. Never write a number of hours, a percentage, or phrases like "clients report" / "customers say".
+- Keep a mini AIDA flow in 30-50 words: a fresh attention line, one benefit or problem, one soft question.
 
 Respond with ONLY valid JSON matching exactly: {"subject": string, "body": string}`;
 
