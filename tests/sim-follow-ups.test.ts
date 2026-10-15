@@ -353,3 +353,15 @@ test("the mailbox's daily limit resets at the CLIENT's midnight, not the server'
   const fresh2 = await app.readiness.reserveMailboxSlot(S.db as never, cid, id(fresh), { touch_number: 1 }, { mailboxId: id(mb) });
   assert.equal(fresh2.ok, true, "the limit reset at the client's midnight");
 });
+
+test("a spammy AI follow-up (\"free\") is never sent: redrafted, then deferred if it keeps failing", async () => {
+  const w = world();
+  const lead = S.seedSentLead(w.cid, w.mbId);
+  S.ai.followUpBody = "Hi Sam, worth a free 15-minute demo this week? Happy to share an example if it helps.";
+  const r = await run(w.cid);
+  assert.equal(r.results[0].result, "error");
+  assert.equal(S.mailer.sent.length, 0);
+  assert.equal(S.pendingLog().length, 0);
+  assert.ok(S.leadRow(id(lead)).next_follow_up_at);
+  assert.ok(S.ai.followUpCalls.length >= 2, "should have tried to redraft");
+});

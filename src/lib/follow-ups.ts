@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { sendMail, mailgunDomainForAddress } from "@/lib/mailgun";
 import { withUnsubscribeFooter, unsubscribeHeaders } from "@/lib/compliance";
 import { draftFollowUpEmail } from "@/lib/gemini";
-import { cleanOutreachEmail } from "@/lib/email-quality";
+import { cleanOutreachEmail, lintOutreachEmail } from "@/lib/email-quality";
 import { autoSendSince } from "@/lib/campaign";
 import { resolveFollowUpIntervalMs, planFollowUp } from "@/lib/follow-up-config";
 import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
@@ -305,7 +305,7 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
         .limit(10)
         .returns<{ provider_message_id: string; subject: string | null; body: string | null }[]>();
       const prevSend = priorSends && priorSends.length ? priorSends[priorSends.length - 1] : null;
-      const draft = cleanOutreachEmail(await draftFollowUpEmail({
+      const draftParams = {
         businessContext,
         sellingDescription,
         senderCompany: client?.company_name ?? "us",
@@ -316,7 +316,15 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
         followUpNumber: followUpIndex,
         isLastFollowUp: isLast,
         previousEmails: (priorSends ?? []).filter((p) => p.body).map((p) => ({ subject: p.subject ?? "", body: p.body ?? "" })),
-      }));
+      };
+      // Never send a follow-up that trips the spam checks (e.g. "free"): redraft a few times, then defer the lead.
+      let draft = cleanOutreachEmail(await draftFollowUpEmail(draftParams));
+      let lintIssues = lintOutreachEmail(draft, { firstTouch: false });
+      for (let attempt = 0; lintIssues.length && attempt < 2; attempt++) {
+        draft = cleanOutreachEmail(await draftFollowUpEmail(draftParams));
+        lintIssues = lintOutreachEmail(draft, { firstTouch: false });
+      }
+      if (lintIssues.length) throw new Error(`Follow-up draft failed spam checks: ${lintIssues.join("; ")}`);
       // Same subject as the first email (no "Re:") so Gmail and other clients group every touch into ONE thread
       // through the In-Reply-To header, without the fake-reply prefix that cold-email filters penalise.
       const threadSubject = (priorSends ?? []).map((p) => (p.subject ?? "").trim()).find((s) => s && s !== "(sending)");

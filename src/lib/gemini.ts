@@ -432,7 +432,7 @@ Hard rules:
 - Under 50 words total. Follow-ups must be much shorter than the first email.
 - Write it as a short note continuing the same conversation (it is sent in the same email thread): do NOT re-introduce the company or repeat the original pitch.
 - Never start with "Just following up", "I wanted to", "I hope", or "I'm checking in".
-- No guilt-tripping. No fake urgency. No hype words.
+- No guilt-tripping. No fake urgency. No hype words: never write free, guaranteed, urgent, double or 100%.
 - No links, no markdown, plain text only. One question at most.
 - Subject line: any short placeholder — the system replaces it with the original thread's subject.
 - Do not invent facts, stats, testimonials or results not in the business context.
