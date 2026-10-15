@@ -55,7 +55,7 @@ test("lint rejects invented statistics and customer claims", async () => {
 
 test("spam score: normal outreach stays under the limit, stacked spam signals fail", async () => {
   const { spamScore, lintOutreachEmail, SPAM_SCORE_LIMIT } = await import("../src/lib/email-quality.ts");
-  const ok = { subject: "quick question about acme realty", body: "Hi Sam, most agencies lose warm buyers when replies come late. We set up automatic replies so every enquiry gets an answer within minutes. Would a quick chat next week help?" };
+  const ok = { subject: "quick question about acme realty", body: "Hi Sam, most agencies like Acme Realty lose warm buyers when replies come late. We set up automatic replies so every enquiry gets an answer within minutes. Would a quick chat next week help?" };
   assert.ok(spamScore(ok).total < SPAM_SCORE_LIMIT);
   assert.deepEqual(lintOutreachEmail(ok), []);
   const spammy = { subject: "AMAZING OFFER $$ just for you", body: "Hi Sam, special offer: save big with our game-changer, only 3 spots left, hurry. Reply now at bit.ly/xyz to get a discount on a proven system for your agency this week." };
@@ -76,4 +76,14 @@ test("lint rejects a follow-up that copies earlier wording, and subjects over 50
   const fresh = "Hi Sam, how do you handle enquiries that arrive while your team is out at viewings? Curious whether anything slips through on busy days. Is that something you notice?";
   assert.deepEqual(lintOutreachEmail({ subject: "quick idea", body: fresh }, { firstTouch: false, earlierBodies: [first] }), []);
   assert.ok(lintOutreachEmail({ subject: "a very long subject line that goes well past fifty characters", body: fresh }, { firstTouch: false }).some((i) => i.startsWith("subject longer")));
+});
+
+test("lint: subject must relate to the body, and the closing question must be short", async () => {
+  const { lintOutreachEmail, subjectMatchesBody } = await import("../src/lib/email-quality.ts");
+  const body = "Hi Sam, most agencies lose warm buyers when replies come late. We set up automatic replies so every enquiry gets an answer within minutes. Would a quick chat next week help?";
+  assert.equal(subjectMatchesBody("faster replies for agencies", body), true);
+  assert.equal(subjectMatchesBody("your invoice is ready", body), false);
+  assert.ok(lintOutreachEmail({ subject: "your invoice is ready", body }).includes("subject does not match the email"));
+  const long = body.replace("Would a quick chat next week help?", "Would it be at all possible for you to find some time next week to have a really quick chat with me about whether any of this could help your team right now?");
+  assert.ok(lintOutreachEmail({ subject: "faster replies for agencies", body: long }).includes("closing question too long"));
 });

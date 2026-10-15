@@ -127,6 +127,15 @@ export function repeatedWordingShare(text: string, earlier: string[]): number {
   return hit / mine.size;
 }
 
+const SUBJECT_FILLER = new Set(["quick", "question", "idea", "about", "note", "thought", "regarding", "your", "with", "from", "this", "that", "have", "for", "the", "and", "you", "hello", "just"]);
+/** True when the subject shares at least one meaningful word with the body (so it is not clickbait). */
+export function subjectMatchesBody(subject: string, body: string): boolean {
+  const words = subject.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 3 && !SUBJECT_FILLER.has(w));
+  if (!words.length) return true; // nothing to compare, nothing misleading
+  const b = body.toLowerCase();
+  return words.some((w) => b.includes(w.length > 5 ? w.slice(0, w.length - 1) : w));
+}
+
 /** Empty list = safe to send. */
 export function lintOutreachEmail(d: Draft, opts: { firstTouch?: boolean; earlierBodies?: string[] } = { firstTouch: true }): string[] {
   const issues: string[] = [];
@@ -153,6 +162,12 @@ export function lintOutreachEmail(d: Draft, opts: { firstTouch?: boolean; earlie
   if (/\b\d+(\.\d+)?\s*\+?\s*(%|percent\b|hours?\s+(per|a|each|every)\b|x\s+(more|faster|better))/i.test(body)) issues.push("invented statistic");
   if (/\b(clients|customers|users|businesses)\s+(report|say|tell us|see|have seen)\b/i.test(body)) issues.push("invented customer claim");
   if ((body.match(/!/g) ?? []).length > 1) issues.push("more than one exclamation mark");
+  // One easy call to action: a very long closing question is a demand, not an easy ask.
+  const lastQuestion = body.split(/(?<=[.?!])\s+|\n+/).filter((x) => x.trim().endsWith("?")).pop();
+  if (lastQuestion && wordCount(lastQuestion) > 25) issues.push("closing question too long");
+  if ((body.match(/\?/g) ?? []).length > 2) issues.push("more than two questions");
+  // The subject must relate to the body, otherwise it reads as clickbait.
+  if (opts.firstTouch !== false && !subjectMatchesBody(subject, body)) issues.push("subject does not match the email");
   if (opts.earlierBodies?.length && repeatedWordingShare(body, opts.earlierBodies) > 0.35) issues.push("repeats wording from earlier emails");
   const score = spamScore(d);
   if (score.total >= SPAM_SCORE_LIMIT) issues.push(`spam score ${score.total} (limit ${SPAM_SCORE_LIMIT}): ${score.hits.join(", ")}`);

@@ -59,9 +59,22 @@ export default function DomainMailboxList({ mailboxes }: { mailboxes: MailboxRow
     }
   }
 
+  // Many mailboxes on one domain share one domain reputation, so more of them does not mean more safe volume.
+  const perDomain = new Map<string, number>();
+  for (const m of mailboxes) {
+    const d = m.address.split("@").pop()?.toLowerCase() ?? "";
+    perDomain.set(d, (perDomain.get(d) ?? 0) + 1);
+  }
+  const crowded = [...perDomain.entries()].filter(([, n]) => n > 3);
+
   return (
     <div>
       <h2 className="text-lg font-semibold">Mailboxes</h2>
+      {crowded.length > 0 && (
+        <p className="mt-2 rounded-md bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          {crowded.map(([d, n]) => `${d} has ${n} mailboxes`).join("; ")}. About 3 per domain is the usual safe maximum: all mailboxes on a domain share one reputation, so extra ones add risk, not capacity.
+        </p>
+      )}
       {error && (
         <p className="mt-2 rounded-md bg-red-50 p-3 text-sm text-red-800 dark:bg-red-950 dark:text-red-300">{error}</p>
       )}
