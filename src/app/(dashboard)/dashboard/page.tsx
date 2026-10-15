@@ -72,7 +72,7 @@ export default async function DashboardPage() {
     data: { user },
   } = await supabase.auth.getUser();
   const { data: currentClientRow } = user
-    ? await supabase.from("clients").select("id").eq("auth_user_id", user.id).maybeSingle()
+    ? await supabase.from("clients").select("id, timezone").eq("auth_user_id", user.id).maybeSingle()
     : { data: null };
 
   const outreachStatus = currentClientRow ? await getOutreachStatus(supabase, currentClientRow.id) : null;
@@ -164,7 +164,7 @@ export default async function DashboardPage() {
         <StatCard label="Appointments upcoming" value={upcomingBookings ?? 0} />
       </div>
 
-      <OutreachPipeline status={outreachStatus} />
+      <OutreachPipeline status={outreachStatus} timeZone={(currentClientRow as { timezone?: string | null } | null)?.timezone || "UTC"} />
 
       <div>
         <h2 className="text-lg font-semibold">Lead nurture (today)</h2>

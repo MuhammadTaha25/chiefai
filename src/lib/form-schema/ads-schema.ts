@@ -264,11 +264,10 @@ export const ADS_SCHEMA: SectionConfig[] = [
       },
       {
         id: "creative_media",
-        label: "Upload your image or video",
-        help: "We'll use this exact file in your ad instead of generating one. Images up to 10 MB, video up to 300 MB.",
+        label: "Upload your own image or video (optional)",
+        help: "If you upload one, we use this exact file in your ad instead of generating one. Leave it empty to let us create it. Images up to 10 MB, video up to 300 MB.",
         type: "file",
         accept: "image/*,video/*",
-        showIf: (v) => v.has_creative_assets === "yes",
       },
       {
         id: "main_message",

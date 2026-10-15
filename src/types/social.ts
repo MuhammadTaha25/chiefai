@@ -36,6 +36,8 @@ export interface SocialAutomationSettings {
   activated_at: string | null;
   paused_at: string | null;
   post_time: string | null;
+  story_time: string | null;
+  weekly_plan: unknown;
   timezone: string | null;
 }
 

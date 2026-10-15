@@ -92,7 +92,7 @@ type Filter = (q: any) => any;
 export async function getCompanyFacts(admin: SupabaseClient, clientId: string, timezone = "UTC"): Promise<CompanyFacts> {
   const now = new Date();
   const ago = (ms: number) => new Date(now.getTime() - ms).toISOString();
-  const startOfDay = startOfLocalDay(timezone, now);
+  const startOfDay = startOfLocalDay(timezone || "UTC", now);
   const DAY = 864e5;
 
   const count = async (table: string, f: Filter): Promise<number> => {

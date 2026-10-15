@@ -26,8 +26,8 @@ function pipelineStep(leadStatus: string, touchCount: number): string {
 }
 
 // This is a server component, so a bare toLocaleTimeString()/toLocaleDateString() would render in the
-// host clock (UTC on Vercel). Show the owner's timezone instead, defaulting to the app-wide Asia/Karachi.
-export default function OutreachPipeline({ status, timeZone = "Asia/Karachi" }: { status: OutreachStatus | null; timeZone?: string }) {
+// host clock (UTC on Vercel). Show the owner's own timezone instead; the caller passes it and falls back to UTC.
+export default function OutreachPipeline({ status, timeZone = "UTC" }: { status: OutreachStatus | null; timeZone?: string }) {
   return (
     <div>
       <div className="flex items-baseline justify-between">

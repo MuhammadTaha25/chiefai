@@ -51,7 +51,17 @@ function leadDisplay(lead: Lead): { label: string; cls: string; stopped: boolean
   if (lead.booked) return { label: "Booked", cls: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300", stopped: true };
   if (lead.unsubscribed) return { label: "Stopped — unsubscribed", cls: red, stopped: true };
   if (lead.complained) return { label: "Stopped — complaint", cls: red, stopped: true };
-  if (lead.email_bounced) return { label: "Bounced", cls: red, stopped: true };
+  if (lead.email_bounced) return { label: "Bounced — invalid address", cls: red, stopped: true };
+  if (lead.bounce_type === "temporary") {
+    const retryDate = lead.bounce_retry_after
+      ? new Date(lead.bounce_retry_after).toLocaleString("en-US", { dateStyle: "short", timeStyle: "short" })
+      : null;
+    return {
+      label: retryDate ? `Server error — retry ${retryDate}` : "Server error — will retry",
+      cls: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+      stopped: false,
+    };
+  }
   if (lead.manually_stopped) return { label: "Stopped — manual", cls: "bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400", stopped: true };
   if (lead.reply_classification === "BOOKING")
     return { label: "Wants to book (not booked yet)", cls: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300", stopped: false };
@@ -76,6 +86,11 @@ interface DraftState {
   leadName: string;
   subject: string;
   body: string;
+  /** Unsubscribe footer /send-email adds after the body; shown read-only so the preview matches what is sent. */
+  footer: string;
+  /** Where the draft text came from: the saved template on the Campaigns page, or the AI. */
+  source: "template" | "ai" | null;
+  notice: string | null;
   loading: boolean;
   sending: boolean;
   error: string | null;
@@ -97,13 +112,25 @@ export default function LeadsTable({
   const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftState | null>(null);
 
-  async function openDraft(lead: Lead) {
-    setDraft({ leadId: lead.id, leadName: lead.name || lead.email || "this lead", subject: "", body: "", loading: true, sending: false, error: null });
+  async function openDraft(lead: Lead, mode?: "ai") {
+    const leadName = lead.name || lead.email || "this lead";
+    setDraft({ leadId: lead.id, leadName, subject: "", body: "", footer: "", source: null, notice: null, loading: true, sending: false, error: null });
     try {
-      const res = await fetch(`/api/leads/${lead.id}/draft-email`, { method: "POST" });
+      const res = await fetch(`/api/leads/${lead.id}/draft-email${mode === "ai" ? "?mode=ai" : ""}`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not draft email");
-      setDraft({ leadId: lead.id, leadName: lead.name || lead.email || "this lead", subject: data.subject, body: data.body, loading: false, sending: false, error: null });
+      setDraft({
+        leadId: lead.id,
+        leadName,
+        subject: data.subject,
+        body: data.body,
+        footer: data.footer ?? "",
+        source: data.source === "template" || data.source === "ai" ? data.source : null,
+        notice: data.notice ?? null,
+        loading: false,
+        sending: false,
+        error: null,
+      });
     } catch (err) {
       setDraft((prev) => (prev ? { ...prev, loading: false, error: (err as Error).message } : prev));
     }
@@ -252,7 +279,22 @@ This sends a real email.`)) return sendDraft(true);
                       {lead.lead_type === "inbound" ? "Inbound" : "Outbound"}
                     </span>
                   </td>
-                  <td className="px-4 py-3">{lead.lead_source || "—"}</td>
+                  <td className="px-4 py-3">
+                    <div>{lead.lead_source || "—"}</div>
+                    {lead.campaign_month && (
+                      <div className="mt-1 flex flex-wrap items-center gap-1">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
+                          🗓{" "}
+                          {new Date(lead.campaign_month).toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" })}
+                        </span>
+                        {lead.campaign_niche && (
+                          <span className="inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
+                            {lead.campaign_niche}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-zinc-500">
                     {lead.last_contact_at ? new Date(lead.last_contact_at).toLocaleDateString() : "—"}
                   </td>
@@ -331,7 +373,7 @@ This sends a real email.`)) return sendDraft(true);
           <div className="w-full max-w-lg rounded-xl border border-black/[.08] bg-background p-6 shadow-xl dark:border-white/[.145]">
             <h2 className="text-lg font-semibold">Email to {draft.leadName}</h2>
 
-            {draft.loading && <p className="mt-4 text-sm text-zinc-500">Drafting with AI…</p>}
+            {draft.loading && <p className="mt-4 text-sm text-zinc-500">Drafting…</p>}
 
             {!draft.loading && (
               <div className="mt-4 space-y-3">
@@ -340,6 +382,22 @@ This sends a real email.`)) return sendDraft(true);
                     {draft.error}
                   </p>
                 )}
+                {draft.source === "template" && (
+                  <div className="rounded-md bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                    <p>{draft.notice ?? "This text comes from your saved email template, not the AI."}</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const lead = leads.find((l) => l.id === draft.leadId);
+                        if (lead) void openDraft(lead, "ai");
+                      }}
+                      className="mt-2 rounded-md border border-amber-300 px-3 py-1 text-xs font-medium hover:bg-amber-100 dark:border-amber-800 dark:hover:bg-amber-900"
+                    >
+                      Write with AI instead
+                    </button>
+                  </div>
+                )}
+                {draft.source === "ai" && <p className="text-xs text-zinc-500">Written by AI for this lead — edit freely before sending.</p>}
                 <input
                   value={draft.subject}
                   onChange={(e) => setDraft({ ...draft, subject: e.target.value })}
@@ -353,6 +411,12 @@ This sends a real email.`)) return sendDraft(true);
                   placeholder="Email body"
                   className="w-full rounded-md border border-black/[.08] px-3 py-2 text-sm dark:border-white/[.145] dark:bg-transparent"
                 />
+                {draft.footer && (
+                  <pre
+                    aria-label="Added automatically when the email is sent"
+                    className="whitespace-pre-wrap rounded-md bg-black/[.03] px-3 py-2 text-xs text-zinc-500 dark:bg-white/[.06]"
+                  >{draft.footer}</pre>
+                )}
                 <div className="flex gap-2">
                   <button
                     onClick={() => setDraft(null)}

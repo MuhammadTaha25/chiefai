@@ -32,7 +32,14 @@ export interface Lead {
   booked?: boolean | null;
   unsubscribed?: boolean | null;
   email_bounced?: boolean | null;
+  bounce_type?: "permanent" | "temporary" | null;
+  bounce_retry_after?: string | null;
   complained?: boolean | null;
+  campaign_id?: string | null;
+  /** Joined from campaigns.campaign_month — not in the leads table itself. */
+  campaign_month?: string | null;
+  /** Joined from campaigns.niche — not in the leads table itself. */
+  campaign_niche?: string | null;
   manually_stopped?: boolean | null;
   reply_classification?: string | null;
   id: string;
@@ -68,6 +75,8 @@ export interface SocialPost {
   status: string | null;
   zernio_post_id: string | null;
   published_at: string | null;
+  scheduled_for: string | null;
+  created_at: string | null;
 }
 
 export interface BudgetRequest {

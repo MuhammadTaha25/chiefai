@@ -115,7 +115,7 @@ export async function getWorkspaceLeads(supabase: Supabase): Promise<WorkspaceLe
     supabase
       .from("leads")
       .select(
-        "id, name, company, job_title, lead_source, status, follow_up_number, last_contact_at, reply_received, reply_classification, booked, unsubscribed, email_bounced, complained, manually_stopped"
+        "id, name, company, job_title, lead_source, status, follow_up_number, last_contact_at, reply_received, reply_classification, booked, unsubscribed, email_bounced, bounce_type, bounce_retry_after, complained, manually_stopped"
       )
       .or("last_contact_at.not.is.null,follow_up_number.gte.1,reply_received.eq.true")
       .order("last_contact_at", { ascending: false, nullsFirst: false })

@@ -1,6 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getUnhealthyMailboxIds } from "@/lib/mailbox-health";
 import { getMailboxReadiness } from "@/lib/mailgun";
+import { effectiveDailyLimit } from "@/lib/warmup-schedule";
+import { startOfLocalDay } from "@/lib/company-facts";
+import { followUpsPinnedTo, newEmailFits, originalMailboxByLead } from "@/lib/follow-up-capacity";
 
 /**
  * Picks a mailbox this client can actually send from — one whose Mailgun
@@ -47,22 +50,35 @@ export async function pickReadyMailbox(
   return fallback;
 }
 
-/** Start of the current day: the same boundary the Domains page uses for "sent today". */
-export function startOfSendDay(): string {
+/**
+ * Start of the current sending day, as an ISO time. With the client's timezone it is that client's own midnight, the same
+ * boundary send-batch uses for the first-email cap and the Domains page uses for "sent today", so every limit resets at
+ * the same moment. Without a valid timezone it falls back to the server's midnight.
+ */
+export function startOfSendDay(timeZone?: string | null): string {
+  if (timeZone) {
+    try {
+      new Intl.DateTimeFormat("en", { timeZone });
+      return startOfLocalDay(timeZone).toISOString();
+    } catch {
+      // invalid timezone: fall through to the server clock
+    }
+  }
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return d.toISOString();
 }
 
-/** Warmup ramp: the stored daily_send_limit is the day-1 base; it grows by WARMUP_STEP per full day since the mailbox was created, up to WARMUP_CAP. */
-export const WARMUP_STEP = 2;
-export const WARMUP_CAP = 30;
-export function effectiveDailyLimit(m: { daily_send_limit: number | null; created_at?: string | null }, now = Date.now()): number {
-  const base = Math.max(0, m.daily_send_limit ?? 0);
-  if (base === 0) return 0;
-  const ageDays = m.created_at ? Math.max(0, Math.floor((now - new Date(m.created_at).getTime()) / 86400000)) : 0;
-  return Math.max(base, Math.min(WARMUP_CAP, base + WARMUP_STEP * ageDays));
+async function clientTimeZone(admin: SupabaseClient, clientId: string): Promise<string | null> {
+  try {
+    const { data } = await admin.from("clients").select("timezone").eq("id", clientId).maybeSingle<{ timezone: string | null }>();
+    return data?.timezone ?? null;
+  } catch {
+    return null;
+  }
 }
+
+export { WARMUP_CAP, coldLimitForAge, effectiveDailyLimit, describeMailboxLimit } from "@/lib/warmup-schedule";
 
 export type MailboxReservation =
   | { ok: true; mailbox: { id: string; address: string }; reservationId: string }
@@ -72,14 +88,52 @@ export type MailboxReservation =
  * Sales sends today for one mailbox. touch_number 0 (auto-replies to prospects) is excluded: replies are
  * not outbound prospecting, and the limit exists to protect cold-outreach volume.
  */
-export async function salesSendsToday(admin: SupabaseClient, mailboxId: string): Promise<number> {
+async function salesSendsToday(admin: SupabaseClient, mailboxId: string, since: string): Promise<number> {
   const { count } = await admin
     .from("outreach_log")
     .select("id", { count: "exact", head: true })
     .eq("mailbox_id", mailboxId)
     .gte("touch_number", 1)
-    .gte("sent_at", startOfSendDay());
+    .gte("sent_at", since);
   return count ?? 0;
+}
+
+/**
+ * Follow-ups still due today (or overdue) that are pinned to this mailbox because it sent their first email.
+ * New first emails leave room for them (see follow-up-capacity.ts). Any lookup problem counts as 0 so a database
+ * hiccup can never stop sending.
+ */
+async function dueFollowUpsPinnedTo(admin: SupabaseClient, clientId: string, mailboxId: string, dayStart: string): Promise<number> {
+  try {
+    const endOfDay = new Date(new Date(dayStart).getTime() + 24 * 60 * 60 * 1000).toISOString();
+    const { data: due } = await admin
+      .from("leads")
+      .select("id")
+      .eq("client_id", clientId)
+      .gte("follow_up_number", 1)
+      .eq("reply_received", false)
+      .eq("unsubscribed", false)
+      .eq("email_bounced", false)
+      .eq("booked", false)
+      .eq("complained", false)
+      .eq("manually_stopped", false)
+      .lte("next_follow_up_at", endOfDay)
+      .limit(150)
+      .returns<{ id: string }[]>();
+    if (!due?.length) return 0;
+    const ids = due.map((d) => d.id);
+    const { data: firsts } = await admin
+      .from("outreach_log")
+      .select("lead_id, mailbox_id")
+      .eq("client_id", clientId)
+      .in("lead_id", ids)
+      .not("mailbox_id", "is", null)
+      .order("sent_at", { ascending: true })
+      .returns<{ lead_id: string; mailbox_id: string | null }[]>();
+    return followUpsPinnedTo(ids, originalMailboxByLead(firsts ?? []), mailboxId);
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -100,14 +154,19 @@ export async function reserveMailboxSlot(
   admin: SupabaseClient,
   clientId: string,
   leadId: string,
-  row: { touch_number: number; campaign_id?: string | null; subject?: string; body?: string }
+  row: { touch_number: number; campaign_id?: string | null; subject?: string; body?: string },
+  options?: { mailboxId?: string; timeZone?: string | null }
 ): Promise<MailboxReservation> {
-  const { data: mailboxes } = await admin
+  // "Today" is the client's own day, so the mailbox limit and the first-email cap reset at the same moment.
+  const dayStart = startOfSendDay(options?.timeZone ?? (await clientTimeZone(admin, clientId)));
+  const { data: allMailboxes } = await admin
     .from("mailboxes")
     .select("id, address, daily_send_limit, created_at")
     .eq("client_id", clientId)
     .order("created_at", { ascending: true })
     .returns<{ id: string; address: string; daily_send_limit: number | null; created_at: string }[]>();
+  // Block mode: only the mailbox whose block is running right now may send.
+  const mailboxes = options?.mailboxId ? (allMailboxes ?? []).filter((m) => m.id === options.mailboxId) : allMailboxes;
   if (!mailboxes || mailboxes.length === 0) return { ok: false, reason: "no_mailbox" };
 
   const { data: last } = await admin
@@ -134,7 +193,7 @@ export async function reserveMailboxSlot(
       skippedUnhealthy = true;
       continue;
     }
-    readyMailboxes.push({ m, used: await salesSendsToday(admin, m.id) });
+    readyMailboxes.push({ m, used: await salesSendsToday(admin, m.id, dayStart) });
   }
   const ordered = readyMailboxes
     .sort((x, y) => Number(y.m.id === preferredId) - Number(x.m.id === preferredId) || x.used - y.used || Math.random() - 0.5)
@@ -143,12 +202,17 @@ export async function reserveMailboxSlot(
   let sawReady = false;
   for (const m of ordered) {
     sawReady = true;
-    const limit = effectiveDailyLimit(m);
+    const limit = effectiveDailyLimit(m, Date.now(), !unhealthy.has(m.id));
+    // A NEW first email (touch 1) only gets the slots left after the follow-ups still due today that are pinned
+    // to this mailbox, so follow-ups are not starved by new sends. Follow-ups themselves use the full limit.
+    const reservedForFollowUps = row.touch_number === 1 ? await dueFollowUpsPinnedTo(admin, clientId, m.id, dayStart) : 0;
     // Contention can make every racing request back off at once (safe, but nobody wins); a short random
     // jitter and retry lets one of them through. The limit is re-checked on every attempt.
     for (let attempt = 0; attempt < 4; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, 40 + Math.random() * 160));
-    if ((await salesSendsToday(admin, m.id)) >= limit) break;
+    const usedNow = await salesSendsToday(admin, m.id, dayStart);
+    if (usedNow >= limit) break;
+    if (reservedForFollowUps > 0 && !newEmailFits(usedNow, reservedForFollowUps, limit)) break;
 
     const { data: reserved, error } = await admin
       .from("outreach_log")
@@ -166,7 +230,7 @@ export async function reserveMailboxSlot(
       .single<{ id: string }>();
     if (error || !reserved) break;
 
-    if ((await salesSendsToday(admin, m.id)) > limit) {
+    if ((await salesSendsToday(admin, m.id, dayStart)) > limit) {
       await admin.from("outreach_log").delete().eq("id", reserved.id);
       continue;
     }

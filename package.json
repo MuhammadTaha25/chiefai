@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/*.test.ts",
+    "test": "node --test --experimental-test-module-mocks --import ./scripts/register-alias.mjs tests/*.test.ts",
     "qa:social": "node --import ./scripts/register-alias.mjs scripts/qa-social-local.ts",
     "tunnel": "ngrok http 3000 --url=whiny-shawn-amphitheatrically.ngrok-free.dev"
   },

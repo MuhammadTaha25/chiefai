@@ -1,41 +1,30 @@
-import { reserveMailboxSlot, finalizeReservation, releaseReservation, effectiveDailyLimit, salesSendsToday } from "@/lib/mailbox-readiness";
+import { reserveMailboxSlot, finalizeReservation, releaseReservation } from "@/lib/mailbox-readiness";
 import { getClientBusinessContext, formatBusinessContext } from "@/lib/business-context";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { FORM_LEAD_SOURCE, autoSendSince } from "@/lib/campaign";
-import { draftOfferPhrases } from "@/lib/gemini";
-import { buildTemplateEmail } from "@/lib/outreach-template";
+import { draftOfferPhrases, draftAidaEmail } from "@/lib/gemini";
+import { fetchCompanyDescriptionViaMcp } from "@/lib/vibe-prospecting-mcp";
+// Note: fetchCompanyDescriptionViaMcp uses the already-connected Vibe Prospecting OAuth session.
+// No separate API key needed — falls back gracefully to null if not connected or any error.
+import { bareDomain, buildTemplateEmail } from "@/lib/outreach-template";
+import { renderCustomTemplate } from "@/lib/custom-template";
 import { cleanOutreachEmail, lintOutreachEmail } from "@/lib/email-quality";
 import { sendMail, mailgunDomainForAddress, getMailboxReadiness } from "@/lib/mailgun";
 import { withUnsubscribeFooter, unsubscribeHeaders } from "@/lib/compliance";
 import { resolveFirstFollowUpDelayMs } from "@/lib/follow-up-config";
+import { DEFAULT_SEND_WINDOW, activeBlockIndex, planBlocks, resolveSendWindow } from "@/lib/send-window";
+import { isValidTimeZone, localClock } from "@/lib/social-schedule";
+import { resolveDailySendCap } from "@/lib/send-cap";
+import { effectiveDailyLimit } from "@/lib/mailbox-readiness";
 import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
+import { startOfLocalDay } from "@/lib/company-facts";
 
+// Default daily cap lives in send-cap.ts (DEFAULT_DAILY_INITIAL_SEND_LIMIT = 4); a tenant can override it with clients.daily_send_cap.
 // The delay before the first follow-up check comes from follow-up-config.ts
 // (client-configurable via criteria.follow_up_delay_days, default 3 days) —
 // shared with follow-ups.ts so the two can never silently diverge.
-// Spread sends out instead of firing all four back-to-back (spec §12).
-// Configurable — defaults keep a manual/test run's total wall-clock time
-// reasonable; a real production cron can widen this via env vars.
-const MIN_SEND_DELAY_MS = Number(process.env.DAILY_SEND_MIN_DELAY_MS ?? 15_000);
-const MAX_SEND_DELAY_MS = Number(process.env.DAILY_SEND_MAX_DELAY_MS ?? 60_000);
-
-function randomDelayMs() {
-  return MIN_SEND_DELAY_MS + Math.floor(Math.random() * (MAX_SEND_DELAY_MS - MIN_SEND_DELAY_MS + 1));
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** Fisher-Yates — mailbox order must be genuinely randomized per run, not a fixed hardcoded mapping (spec §11). */
-function shuffle<T>(arr: T[]): T[] {
-  const copy = [...arr];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
+// Pacing: one send per run. Mailboxes run in blocks across the window (send-window.ts); inside a block, sends are spaced
+// by the planned gap, enforced by checking the last send time. The cron cadence decides when the next run can go.
 
 interface EligibleLead {
   id: string;
@@ -43,28 +32,18 @@ interface EligibleLead {
   company: string | null;
   job_title: string | null;
   email: string;
-  campaign_id: string | null;
-}
-
-interface Mailbox {
-  id: string;
-  address: string;
-  daily_send_limit: number | null;
-  created_at: string;
+  city: string | null;
+  country: string | null;
 }
 
 /**
  * Sends today's batch of initial outreach emails for one client's active
- * monthly campaign — up to the client's real remaining mailbox capacity today,
- * one per eligible lead, rotated across the client's own mailboxes only, with a randomized delay
- * between sends. Never touches another client's mailbox or leads (every
+ * monthly campaign — up to the tenant daily cap, one per eligible lead,
+ * sent in mailbox blocks across the client's window (see planBlocks), only from the client's own mailboxes. Never touches another client's mailbox or leads (every
  * query below is scoped to `clientId`, resolved server-side).
  */
 export async function sendBatchForClient(clientId: string) {
   const admin = createAdminClient();
-
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
 
   const campaignMonth = (() => {
     const now = new Date();
@@ -82,58 +61,133 @@ export async function sendBatchForClient(clientId: string) {
     return { clientId, result: "skipped", detail: "no active campaign this month" };
   }
 
-  const { data: allMailboxes } = await admin
-    .from("mailboxes")
-    .select("id, address, daily_send_limit, created_at")
-    .eq("client_id", clientId)
-    .returns<Mailbox[]>();
-  // Only mailboxes whose Mailgun domain is actually verified may send.
-  const mailboxes: Mailbox[] = [];
-  for (const m of allMailboxes ?? []) if ((await getMailboxReadiness(m.address)) === "ready") mailboxes.push(m);
+  // Sending window and timezone: campaign-level overrides take precedence over client-level defaults.
+  // The default window 08:00-24:00 applies in the resolved timezone, never a server default. Without
+  // a valid timezone nothing is sent. Mailboxes run in blocks: mailbox i (in creation order) owns
+  // block i of the day. Only the mailbox whose block is running now may send.
+  // Resolved BEFORE the daily-cap count below, because "today" starts at midnight in the CLIENT's timezone, not the
+  // server's (a server-clock midnight would reset the cap in the middle of the send window for clients whose
+  // window crosses UTC midnight, allowing roughly double the intended daily sends).
+  const [{ data: clientRow }, { data: campaignRow }] = await Promise.all([
+    admin.from("clients").select("*").eq("id", clientId).maybeSingle(),
+    admin.from("campaigns")
+      .select("send_window_start, send_window_end, timezone, template_subject, template_body")
+      .eq("id", campaign.id)
+      .maybeSingle<{ send_window_start: string | null; send_window_end: string | null; timezone: string | null; template_subject: string | null; template_body: string | null }>(),
+  ]);
+  // Campaign overrides fall back to client-level values
+  const resolvedTimezone = campaignRow?.timezone ?? clientRow?.timezone;
+  const resolvedWindowStart = campaignRow?.send_window_start ?? clientRow?.outreach_send_start;
+  const resolvedWindowEnd = campaignRow?.send_window_end ?? clientRow?.outreach_send_end;
+  const resolvedTemplateSubject = campaignRow?.template_subject ?? clientRow?.outreach_template_subject;
+  const resolvedTemplateBody = campaignRow?.template_body ?? clientRow?.outreach_template_body;
 
-  if (!mailboxes || mailboxes.length === 0) {
-    // Never fall back to another client's mailbox (spec §3, §27).
-    return { clientId, campaignId: campaign.id, result: "skipped", detail: "no verified mailbox for this client" };
+  if (!isValidTimeZone(resolvedTimezone)) {
+    return { clientId, campaignId: campaign.id, result: "skipped", detail: "client timezone not set: choose it in the sending window settings" };
   }
+  const sendTz = resolvedTimezone;
+  const startOfToday = startOfLocalDay(sendTz);
 
-  // Idempotent daily cap: this used to be a flat 4-per-day regardless of how many mailboxes the
-  // client actually has or their warmup-grown capacity — with several ready mailboxes it silently
-  // throttled real send volume to 4/day with leads showing "Queued" and no explanation. Now it's the
-  // sum of each ready mailbox's real remaining capacity today (reserveMailboxSlot enforces the
-  // per-mailbox share of this at send time; this just sizes how many leads this run even attempts).
-  const perMailboxRemaining = await Promise.all(
-    mailboxes.map(async (m) => Math.max(0, effectiveDailyLimit(m) - (await salesSendsToday(admin, m.id))))
+  // Idempotent daily cap: counts sends already recorded today, so running
+  // this route twice in one day (retry, overlapping cron) never sends more
+  // than the daily cap total — the cap is enforced against actual
+  // outreach_log rows, not an in-memory counter that resets per invocation.
+  const { count: sentToday } = await admin
+    .from("outreach_log")
+    .select("id", { count: "exact", head: true })
+    .eq("client_id", clientId)
+    .eq("touch_number", 1)
+    .gte("sent_at", startOfToday.toISOString());
+
+  // Optional per-tenant override (column may not exist yet / be null -> historical default of 4).
+  const [{ data: capRow }, { data: capMailboxes }] = await Promise.all([
+    admin.from("clients").select("daily_send_cap").eq("id", clientId).maybeSingle<{ daily_send_cap: number | null }>(),
+    admin.from("mailboxes").select("id, address, daily_send_limit, created_at").eq("client_id", clientId).order("created_at", { ascending: true }).returns<{ id: string; address: string; daily_send_limit: number | null; created_at: string }[]>(),
+  ]);
+  // Health is computed once here for the capacity estimate; reserveMailboxSlot re-checks per slot atomically.
+  const { getUnhealthyMailboxIds: _getUnhealthy } = await import("@/lib/mailbox-health");
+  const unhealthyForCap = await _getUnhealthy(admin, clientId);
+  const mailboxCapacity = (capMailboxes ?? []).reduce(
+    (sum, m) => sum + effectiveDailyLimit(m, Date.now(), !unhealthyForCap.has(m.id)),
+    0,
   );
-  const remaining = perMailboxRemaining.reduce((a, b) => a + b, 0);
+  const dailyCap = resolveDailySendCap(capRow?.daily_send_cap, mailboxCapacity);
+  const remaining = dailyCap - (sentToday ?? 0);
   if (remaining <= 0) {
     return { clientId, campaignId: campaign.id, result: "skipped", detail: "daily limit already reached" };
+  }
+
+  const sendWindow = resolveSendWindow(resolvedWindowStart, resolvedWindowEnd);
+  const usingDefaultWindow = sendWindow === DEFAULT_SEND_WINDOW;
+  const nowMinute = localClock(sendTz).minutes;
+  const fmt = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+  const windowLabel = `${fmt(sendWindow.startMin)}-${fmt(sendWindow.endMin)} ${sendTz}${usingDefaultWindow ? " (default)" : ""}`;
+
+  const blockMailboxes = (capMailboxes ?? []) as { id: string; address: string }[];
+  if (blockMailboxes.length === 0) {
+    return { clientId, campaignId: campaign.id, result: "skipped", detail: "no mailbox for this client" };
+  }
+  // The plan follows the daily total and the number of mailboxes. If the total cannot fit the window at the 5-minute
+  // floor, the batch uses the most that does fit and reports the shortfall; the rest waits for tomorrow.
+  let plan = planBlocks(sendWindow, blockMailboxes.length, dailyCap);
+  let pacingWarning: string | undefined;
+  if (!plan.feasible) {
+    if (plan.maxSends === 0) {
+      // Window is too narrow for even one send per mailbox at the minimum gap.
+      // Most common cause: many mailboxes with a short send window.
+      // Tell the operator clearly rather than silently skipping.
+      return {
+        clientId,
+        campaignId: campaign.id,
+        result: "skipped",
+        detail: `send window ${windowLabel} is too narrow for ${blockMailboxes.length} mailbox${blockMailboxes.length === 1 ? "" : "es"} — widen the window in Settings → Sending Schedule (need at least ${blockMailboxes.length} hour${blockMailboxes.length === 1 ? "" : "s"} for ${blockMailboxes.length} mailbox${blockMailboxes.length === 1 ? "" : "es"})`,
+      };
+    }
+    plan = planBlocks(sendWindow, blockMailboxes.length, plan.maxSends);
+    pacingWarning = `Daily total ${dailyCap} does not fit the ${windowLabel} window at the 5-minute floor; sending ${plan.perMailbox * blockMailboxes.length} today, the rest waits for tomorrow.`;
+  }
+
+  const blockIndex = activeBlockIndex(plan, sendWindow, nowMinute);
+  if (blockIndex < 0) {
+    return { clientId, campaignId: campaign.id, result: "skipped", detail: `not inside a mailbox block right now (${windowLabel})` };
+  }
+  const activeMailbox = blockMailboxes[blockIndex];
+  if ((await getMailboxReadiness(activeMailbox.address)) !== "ready") {
+    return { clientId, campaignId: campaign.id, result: "skipped", detail: `block mailbox ${activeMailbox.address} is not ready (Mailgun domain not verified)` };
+  }
+
+  // This mailbox sends its share once per day: its block is done when it has reached its per-block count.
+  const { count: blockSent } = await admin
+    .from("outreach_log")
+    .select("id", { count: "exact", head: true })
+    .eq("mailbox_id", activeMailbox.id)
+    .eq("touch_number", 1)
+    .gte("sent_at", startOfToday.toISOString());
+  if ((blockSent ?? 0) >= plan.perMailbox) {
+    return { clientId, campaignId: campaign.id, result: "skipped", detail: "this mailbox's block is already done today" };
+  }
+
+  // Planned gap between sends (block length / per-block count, never below the 5-minute floor).
+  const { data: lastSentRow } = await admin
+    .from("outreach_log")
+    .select("sent_at")
+    .eq("client_id", clientId)
+    .eq("touch_number", 1)
+    .gte("sent_at", startOfToday.toISOString())
+    .order("sent_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ sent_at: string }>();
+  if (lastSentRow && Date.now() - Date.parse(lastSentRow.sent_at) < plan.gapUsed * 60_000) {
+    return { clientId, campaignId: campaign.id, result: "skipped", detail: `waiting for the planned ${plan.gapUsed}-minute gap` };
   }
 
   // Only leads the client requested through the lead-gen form (and, when set, created after automation was
   // switched on) are auto-sent; leads saved by default elsewhere are never touched by the scheduler.
   const since = autoSendSince();
-  // A process crash/redeploy between "claim" (last_contact_at set) and "send" used to strand a lead
-  // forever: status stays "new" (so eligibleQuery below would still pick it up) but last_contact_at is
-  // already non-null, so the re-claim a few lines down always loses the .is("last_contact_at", null)
-  // race and skips it, every single run. Treat a "new" lead whose claim is older than 15 minutes as
-  // abandoned and release it back for this run to pick up again.
-  const STALE_CLAIM_MS = 15 * 60 * 1000;
-  await admin
-    .from("leads")
-    .update({ last_contact_at: null })
-    .eq("client_id", clientId)
-    .eq("status", "new")
-    .lt("last_contact_at", new Date(Date.now() - STALE_CLAIM_MS).toISOString());
-
-  // Leads are picked by client + source, never by which month's campaign row they happen to belong
-  // to — a lead created late in a month (or whose campaign got marked completed) used to sit
-  // unsent forever once the month rolled over, because this used to filter on campaign_id = this
-  // month's campaign. "Does an active campaign exist for this client right now" (checked above) still
-  // gates whether the client is actively sending at all; it just no longer limits WHICH leads qualify.
   let eligibleQuery = admin
     .from("leads")
-    .select("id, name, company, job_title, email, campaign_id")
-    .eq("client_id", clientId)
+    .select("id, name, company, job_title, email, city, country")
+    .eq("campaign_id", campaign.id)
     .eq("lead_source", FORM_LEAD_SOURCE)
     .eq("status", "new")
     .eq("unsubscribed", false)
@@ -164,9 +218,6 @@ export async function sendBatchForClient(clientId: string) {
     return { clientId, campaignId: campaign.id, result: "skipped", detail: "no saved outreach description (what_you_sell)" };
   }
 
-  const { data: clientRow } = await admin.from("clients").select("*").eq("id", clientId).maybeSingle();
-
-  // Randomized mailbox rotation, not a fixed lead-position -> mailbox map.
   const context = await getClientBusinessContext(admin, clientId);
   const businessContext = formatBusinessContext(context);
 
@@ -176,7 +227,6 @@ export async function sendBatchForClient(clientId: string) {
   // Industry is only stated when the campaign targeted exactly one, so it is never guessed per lead.
   const targetIndustries = Array.isArray(job?.criteria?.target_industries) ? (job!.criteria.target_industries as string[]) : [];
   const industry = targetIndustries.length === 1 ? String(targetIndustries[0]) : null;
-  const rotatedMailboxes = shuffle(mailboxes);
   const sent: { leadId: string; mailbox: string; result: "sent" | "failed"; error?: string }[] = [];
   // P0 defensive re-check: fetched once per batch, not per lead. Normal
   // operation never hits this (mailbox creation already gates on
@@ -185,11 +235,11 @@ export async function sendBatchForClient(clientId: string) {
   // trusting that every upstream gate was correctly applied.
   const externalDomains = await getExternalDomainsForClient(admin, clientId);
 
-  for (let i = 0; i < eligibleLeads.length; i++) {
+  // One lead per run: the next planned slot is picked up by the next scheduled run (see pacing above).
+  for (let i = 0; i < 1 && i < eligibleLeads.length; i++) {
     const lead = eligibleLeads[i];
-    // Mailbox choice + daily-limit enforcement live in reserveMailboxSlot (atomic); the random rotation
-    // above is superseded by "first ready mailbox with capacity".
-    const reservation = await reserveMailboxSlot(admin, clientId, lead.id, { touch_number: 1, campaign_id: lead.campaign_id ?? campaign.id });
+    // The block's mailbox is the only one allowed here; daily-limit enforcement stays in reserveMailboxSlot (atomic).
+    const reservation = await reserveMailboxSlot(admin, clientId, lead.id, { touch_number: 1, campaign_id: campaign.id }, { mailboxId: activeMailbox.id, timeZone: sendTz });
     if (!reservation.ok) {
       sent.push({ leadId: lead.id, mailbox: "-", result: "failed", error: reservation.reason === "at_capacity" ? "mailbox daily limit reached" : reservation.reason === "all_unhealthy" ? "all mailboxes paused: high bounce/complaint rate" : "no ready mailbox" });
       break;
@@ -224,19 +274,63 @@ export async function sendBatchForClient(clientId: string) {
       const isBusinessLead = !lead.job_title || (lead.name ?? "").trim().toLowerCase() === (lead.company ?? "").trim().toLowerCase();
       const senderCompany = clientRow?.company_name ?? "us";
 
-      // Fixed template, lint-checked. A draft that cannot pass is NOT sent (it would hurt the mailbox's reputation);
-      // the lead stays "new" for the next run.
-      const draft = cleanOutreachEmail(
+      // Try AIDA AI draft first; fall back to fixed template if it fails or fails the lint.
+      // This gives each lead a personalised email while keeping deliverability as the hard backstop.
+      const fixedDraft = cleanOutreachEmail(
         buildTemplateEmail({
           firstName: isBusinessLead ? null : lead.name,
           leadCompany: lead.company || "your company",
           industry,
+          jobTitle: isBusinessLead ? null : lead.job_title ?? null,
           offer: phrases.offer,
           benefit: phrases.benefit,
           senderCompany,
           website: context.website ?? null,
         })
       );
+      let draft = fixedDraft;
+      try {
+        // Fetch company description from Explorium for richer personalisation.
+        // Runs in parallel with nothing else — failure silently returns null
+        // and we fall back to the plain businessContext already set above.
+        const companyDesc = await fetchCompanyDescriptionViaMcp({
+          companyName: lead.company || "",
+          companyDomain: null,
+        });
+        const enrichedContext = companyDesc
+          ? `${businessContext ? businessContext + "\n\n" : ""}ABOUT THE LEAD'S COMPANY:\n${companyDesc}`
+          : businessContext;
+
+        const aidaDraft = cleanOutreachEmail(
+          await draftAidaEmail({
+            sellingDescription,
+            senderCompany,
+            leadName: isBusinessLead ? (lead.company || "there") : (lead.name || "there"),
+            leadCompany: lead.company || "your company",
+            leadTitle: isBusinessLead ? null : (lead.job_title ?? null),
+            leadCity: lead.city ?? null,
+            leadCountry: lead.country ?? null,
+            businessContext: enrichedContext,
+          })
+        );
+        // Only use the AIDA draft if it passes all deliverability checks; otherwise keep the fixed template.
+        if (lintOutreachEmail(aidaDraft).length === 0) draft = aidaDraft;
+      } catch {
+        // AIDA generation failed (rate-limit, timeout, etc.) — fixed template is already set.
+      }
+      if (resolvedTemplateBody && resolvedTemplateSubject) {
+        const custom = cleanOutreachEmail(
+          renderCustomTemplate(resolvedTemplateSubject, resolvedTemplateBody, {
+            first_name: isBusinessLead ? null : lead.name,
+            company: lead.company,
+            industry,
+            job_title: isBusinessLead ? null : lead.job_title ?? null,
+            sender_company: senderCompany,
+            website: bareDomain(context.website),
+          })
+        );
+        if (lintOutreachEmail(custom).length === 0) draft = custom;
+      }
       const issues = lintOutreachEmail(draft);
       if (issues.length) throw new Error(`Draft failed deliverability checks: ${issues.join("; ")}`);
 
@@ -271,8 +365,6 @@ export async function sendBatchForClient(clientId: string) {
       // of today's batch — it just stays "new" for tomorrow's run to retry.
       sent.push({ leadId: lead.id, mailbox: mailbox.address, result: "failed", error: (err as Error).message });
     }
-
-    if (i < eligibleLeads.length - 1) await sleep(randomDelayMs());
   }
 
   const successCount = sent.filter((s) => s.result === "sent").length;
@@ -283,6 +375,6 @@ export async function sendBatchForClient(clientId: string) {
       .eq("id", campaign.id);
   }
 
-  return { clientId, campaignId: campaign.id, result: "processed", sent };
+  return { clientId, campaignId: campaign.id, result: "processed", sent, ...(pacingWarning ? { warning: pacingWarning } : {}) };
 }
 

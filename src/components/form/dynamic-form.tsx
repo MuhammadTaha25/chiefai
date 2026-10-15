@@ -44,6 +44,8 @@ export function DynamicForm({
   reviewNote = "Review the plan below. Submitting only finds and saves leads — no emails are sent. You will draft, review and send each email yourself from the Leads page.",
   initialValues,
   initialReviewing = false,
+  ignoreDraft = false,
+  initialStepId,
 }: {
   sections: SectionConfig[];
   title: string;
@@ -58,13 +60,23 @@ export function DynamicForm({
   initialValues?: FormValues;
   /** Skip straight to the review step with initialValues already filled in. */
   initialReviewing?: boolean;
+  /** Ignore any saved sessionStorage draft and open from initialValues (used by Edit ad, so it never reopens on an old review step). */
+  ignoreDraft?: boolean;
+  /** Open on this section id instead of the first one (e.g. "creative" for the Edit ad form). */
+  initialStepId?: string;
 }) {
   // Lazy initializers run once on mount, before the first paint — this is
   // what makes returning to the page show restored progress instead of a
   // flash of step 1 followed by a jump to the real step.
-  const [step, setStep] = useState(() => loadDraft(formId)?.step ?? 0);
-  const [reviewing, setReviewing] = useState(() => loadDraft(formId)?.reviewing ?? initialReviewing);
-  const [values, setValues] = useState<FormValues>(() => loadDraft(formId)?.values ?? initialValues ?? {});
+  const [step, setStep] = useState(() => {
+    if (ignoreDraft) {
+      const idx = initialStepId ? sections.findIndex((s) => s.id === initialStepId) : -1;
+      return idx >= 0 ? idx : 0;
+    }
+    return loadDraft(formId)?.step ?? 0;
+  });
+  const [reviewing, setReviewing] = useState(() => (ignoreDraft ? initialReviewing : loadDraft(formId)?.reviewing ?? initialReviewing));
+  const [values, setValues] = useState<FormValues>(() => (ignoreDraft ? initialValues ?? {} : loadDraft(formId)?.values ?? initialValues ?? {}));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [agreedToTerms, setAgreedToTerms] = useState(false);

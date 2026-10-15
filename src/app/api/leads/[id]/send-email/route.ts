@@ -5,8 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { sendMail, mailgunDomainForAddress } from "@/lib/mailgun";
 import { withUnsubscribeFooter, unsubscribeHeaders } from "@/lib/compliance";
 import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
-
-const FOLLOW_UP_INTERVAL_DAYS = 3;
+import { resolveFollowUpIntervalMs } from "@/lib/follow-up-config";
 
 /**
  * Actually sends an (AI-drafted or edited) email to a lead, from the
@@ -64,17 +63,65 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const admin = createAdminClient();
   const touchNumber = (lead.follow_up_number ?? 0) + 1;
 
+  // The follow-up cadence comes from the client's lead-gen criteria (the same source the follow-up cron uses),
+  // not a hardcoded number of days.
+  const { data: job } = await admin
+    .from("lead_gen_jobs")
+    .select("criteria")
+    .eq("client_id", client.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle<{ criteria: Record<string, unknown> }>();
+
+  // Any email after the first must come from the SAME mailbox that sent the lead's first email (and thread onto
+  // the last real message). Looked up BEFORE reserving a slot, so this send's own "pending:" reservation row can
+  // never be mistaken for the previous message.
+  let pinnedMailboxId: string | undefined;
+  let inReplyTo: string | undefined;
+  if (touchNumber > 1) {
+    const [{ data: firstSend }, { data: prevSend }] = await Promise.all([
+      admin
+        .from("outreach_log")
+        .select("mailbox_id")
+        .eq("client_id", client.id)
+        .eq("lead_id", lead.id)
+        .not("mailbox_id", "is", null)
+        .order("sent_at", { ascending: true })
+        .limit(1)
+        .maybeSingle<{ mailbox_id: string }>(),
+      admin
+        .from("outreach_log")
+        .select("provider_message_id")
+        .eq("client_id", client.id)
+        .eq("lead_id", lead.id)
+        .not("provider_message_id", "is", null)
+        .not("provider_message_id", "like", "pending:%")
+        .order("sent_at", { ascending: false })
+        .limit(1)
+        .maybeSingle<{ provider_message_id: string }>(),
+    ]);
+    pinnedMailboxId = firstSend?.mailbox_id ?? undefined;
+    inReplyTo = prevSend?.provider_message_id ?? undefined;
+  }
+  const pinnedNote = pinnedMailboxId ? " (follow-ups always go out from the mailbox that sent the first email)" : "";
+
   // Reserve a slot on a ready mailbox of this tenant that is under its daily limit (atomic), BEFORE sending.
-  const reservation = await reserveMailboxSlot(admin, client.id, lead.id, { touch_number: touchNumber, subject, body });
+  const reservation = await reserveMailboxSlot(
+    admin,
+    client.id,
+    lead.id,
+    { touch_number: touchNumber, subject, body },
+    pinnedMailboxId ? { mailboxId: pinnedMailboxId } : undefined,
+  );
   if (!reservation.ok) {
     return NextResponse.json(
       {
         error:
-          reservation.reason === "at_capacity"
-            ? "Daily sending capacity reached for all your mailboxes — try again tomorrow"
+          (reservation.reason === "at_capacity"
+            ? "Daily sending capacity reached for the mailbox that must send this — try again tomorrow"
             : reservation.reason === "all_unhealthy"
               ? "Your mailboxes are paused because of a high bounce/complaint rate — add a new mailbox under Domains or review your lead list"
-              : "No verified mailbox available — finish mailbox/DNS setup under Domains first",
+              : "No verified mailbox available — finish mailbox/DNS setup under Domains first") + pinnedNote,
         code: reservation.reason,
       },
       { status: reservation.reason === "at_capacity" ? 429 : 400 }
@@ -98,8 +145,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   try {
     sentMsgId = (
       await sendMail({
+        inReplyTo,
         domain: mailgunDomainForAddress(mailbox.address),
-        from: mailbox.address,
+        // Same sender display name as the automated sends (send-batch / follow-ups), so a lead sees one consistent
+        // sender across the thread, and it looks like a business rather than a bare address.
+        from: `${(client.company_name ?? "").replace(/["<>\r\n]/g, "").trim() || "Team"} <${mailbox.address}>`,
         to: lead.email,
         subject,
         text: withUnsubscribeFooter(body, { company: client.company_name, postalAddress: (client as { postal_address?: string | null }).postal_address }),
@@ -120,7 +170,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         follow_up_number: touchNumber,
         last_contact_at: new Date().toISOString(),
         // Follow-up #1 is scheduled ONLY here, after a successful send (GENERATED != CONTACTED).
-        next_follow_up_at: new Date(Date.now() + FOLLOW_UP_INTERVAL_DAYS * 86400000).toISOString(),
+        next_follow_up_at: new Date(Date.now() + resolveFollowUpIntervalMs(job?.criteria)).toISOString(),
       })
       .eq("id", lead.id),
   ]);

@@ -4,6 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import IntegrationsPanel from "@/components/integrations-panel";
 import CalendlySettings from "@/components/calendly-settings";
 import VoiceNumberPanel from "@/components/voice-number-panel";
+import SendingScheduleSettings from "@/components/sending-schedule-settings";
+import MailboxSendLimitEditor from "@/components/mailbox-send-limit-editor";
 
 interface SocialConnection {
   id: string;
@@ -21,6 +23,7 @@ interface Mailbox {
   address: string;
   warmup_day: number | null;
   daily_send_limit: number | null;
+  created_at: string | null;
 }
 
 export default async function SettingsPage(props: {
@@ -49,7 +52,7 @@ export default async function SettingsPage(props: {
   ] = await Promise.all([
     supabase.from("social_connections").select("*").returns<SocialConnection[]>(),
     supabase.from("domains").select("*").returns<Domain[]>(),
-    supabase.from("mailboxes").select("*").returns<Mailbox[]>(),
+    supabase.from("mailboxes").select("id, address, warmup_day, daily_send_limit, created_at").returns<Mailbox[]>(),
     supabase
       .from("clients")
       .select("calendly_url, calendly_connected_at, calendly_webhook_uri, company_name")
@@ -215,6 +218,14 @@ export default async function SettingsPage(props: {
         </div>
       </section>
 
+      <section id="sending-schedule">
+        <h2 className="text-lg font-semibold">Sending Schedule</h2>
+        <p className="mt-1 text-sm text-zinc-500">
+          Timezone, daily sending window, and follow-up cadence for automated outreach.
+        </p>
+        <SendingScheduleSettings />
+      </section>
+
       <section>
         <h2 className="text-lg font-semibold">Domains</h2>
         <div className="mt-3 space-y-2">
@@ -230,20 +241,15 @@ export default async function SettingsPage(props: {
         </div>
       </section>
 
-      <section>
+      <section id="mailboxes">
         <h2 className="text-lg font-semibold">Mailboxes</h2>
-        <div className="mt-3 space-y-2">
-          {(mailboxes ?? []).map((m) => (
-            <div key={m.id} className="flex items-center justify-between rounded-md border border-black/[.08] px-4 py-3 text-sm dark:border-white/[.145]">
-              <span>{m.address}</span>
-              <span className="text-xs text-zinc-500">
-                Warmup day {m.warmup_day ?? 0} · {m.daily_send_limit ?? 0}/day
-              </span>
-            </div>
-          ))}
-          {(!mailboxes || mailboxes.length === 0) && (
-            <p className="text-sm text-zinc-500">No mailboxes provisioned yet.</p>
-          )}
+        <p className="mt-1 text-sm text-zinc-500">
+          Optionally set a daily send limit per mailbox. Without a limit the warmup curve governs
+          (starts at 4/day, ramps to 30 over ~3 weeks). Setting a limit caps sends at that number
+          once the warmup schedule would otherwise exceed it.
+        </p>
+        <div className="mt-3">
+          <MailboxSendLimitEditor mailboxes={mailboxes ?? []} />
         </div>
       </section>
     </div>

@@ -263,6 +263,87 @@ export async function findProspectsViaVibeProspecting(query: ProspectQuery): Pro
   }));
 }
 
+/**
+ * Fetch a short company description from Vibe Prospecting (Explorium MCP) for
+ * use in personalising cold emails. Uses match-business (name+domain) to get a
+ * business_id, then enrich-business with the "firmographics" enrichment to pull
+ * the description field. Returns null if not connected, no match, or any error —
+ * callers fall back to the AIDA draft without enrichment.
+ *
+ * This is the preferred approach over the Explorium REST API because it reuses
+ * the already-connected OAuth session (no separate EXPLORIUM_API_KEY needed).
+ */
+export async function fetchCompanyDescriptionViaMcp(params: {
+  companyName: string;
+  companyDomain?: string | null;
+}): Promise<string | null> {
+  try {
+    const redirectUri = getRedirectUri(appOrigin());
+    const reasoning = `Enrich company "${params.companyName}" for cold email personalisation`;
+
+    // Step 1: match business_id by name (+ optional domain).
+    const matchPayload = await call(
+      "match-business",
+      {
+        businesses: [
+          {
+            name: params.companyName,
+            ...(params.companyDomain ? { domain: params.companyDomain } : {}),
+          },
+        ],
+        tool_reasoning: reasoning,
+      },
+      redirectUri
+    );
+
+    // match-business returns { results: [{business_id, ...}] } or similar
+    const matchResults = (
+      matchPayload.results ??
+      matchPayload.data ??
+      matchPayload.businesses
+    ) as Record<string, unknown>[] | undefined;
+    if (!Array.isArray(matchResults) || matchResults.length === 0) return null;
+    const businessId = matchResults[0]?.business_id ?? matchResults[0]?.id;
+    if (typeof businessId !== "string") return null;
+
+    // Step 2: enrich firmographics for that business_id.
+    const enrichPayload = await call(
+      "enrich-business",
+      {
+        business_ids: [businessId],
+        enrichments: ["firmographics"],
+        tool_reasoning: reasoning,
+      },
+      redirectUri
+    );
+
+    // Extract rows — same multi-key pattern used throughout this file.
+    const rows = (
+      enrichPayload.data ??
+      enrichPayload.results ??
+      enrichPayload.businesses ??
+      enrichPayload.preview_data
+    ) as Record<string, unknown>[] | undefined;
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    const row = rows[0];
+
+    const desc =
+      row.firmo_business_description ??
+      row.business_description ??
+      row.description ??
+      row.about ??
+      null;
+    if (typeof desc !== "string" || !desc.trim()) return null;
+
+    // First ~400 chars — enough context for AIDA personalisation without
+    // overwhelming the prompt.
+    return desc.trim().slice(0, 400);
+  } catch {
+    // Any error (not connected, match failed, network) → graceful degradation.
+    return null;
+  }
+}
+
 export function runMcpAuthFlow(
   provider: Parameters<typeof runMcpAuthFlowRaw>[0],
   options: Parameters<typeof runMcpAuthFlowRaw>[1]

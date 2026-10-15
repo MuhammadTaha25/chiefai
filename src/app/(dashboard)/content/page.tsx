@@ -8,8 +8,8 @@ export default async function ContentPage() {
 
   const { data: posts } = await supabase
     .from("social_posts")
-    .select("*")
-    .order("published_at", { ascending: false, nullsFirst: true })
+    .select("*, scheduled_for, created_at")
+    .order("created_at", { ascending: false, nullsFirst: true })
     .limit(200)
     .returns<SocialPost[]>();
 
@@ -35,7 +35,7 @@ export default async function ContentPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Content calendar</h1>
         <p className="mt-1 text-sm text-zinc-500">
-          Create a post and publish it now, schedule it, or save it as a draft. Published posts appear below.
+          Create a post and publish it now, schedule it, or save it as a draft. All posts appear below.
         </p>
       </div>
       <PostComposer platforms={publishable} />

@@ -7,8 +7,21 @@ import MailboxSentEmailsModal from "@/components/mailbox-sent-emails-modal";
 interface MailboxRow {
   id: string;
   address: string;
+  /** The limit sending really uses today: the lower of the saved limit and the age-based warm-up ceiling. */
   daily_send_limit: number;
+  /** The limit saved on the mailbox. */
+  configured_limit: number;
+  /** What the age-based warm-up ramp allows today. */
+  warmup_allows: number;
+  limited_by: "configured" | "warm-up" | "none";
+  /** Real warm-up stage, counted from the mailbox's age. */
   warmup_day: number;
+  warmed_up: boolean;
+  days_until_warmed: number;
+  /** Follow-ups overdue by more than an hour that are pinned to this mailbox. */
+  waiting_followups: number;
+  /** Of those, overdue by more than 3 days. */
+  stuck_followups: number;
   sent_today: number;
   sent_this_month: number;
   readiness: "ready" | "verifying" | "not_provisioned" | "sandbox";
@@ -60,7 +73,9 @@ export default function DomainMailboxList({ mailboxes }: { mailboxes: MailboxRow
               <th className="px-4 py-3 font-medium">Status</th>
               <th className="px-4 py-3 font-medium">Sent today</th>
               <th className="px-4 py-3 font-medium">Sent this month</th>
-              <th className="px-4 py-3 font-medium">Warmup day</th>
+              <th className="px-4 py-3 font-medium">Daily limit</th>
+              <th className="px-4 py-3 font-medium">Warm-up</th>
+              <th className="px-4 py-3 font-medium">Follow-ups waiting</th>
               <th className="px-4 py-3 font-medium" />
             </tr>
           </thead>
@@ -80,7 +95,34 @@ export default function DomainMailboxList({ mailboxes }: { mailboxes: MailboxRow
                   {m.sent_today} / {m.daily_send_limit}
                 </td>
                 <td className="px-4 py-3">{m.sent_this_month}</td>
-                <td className="px-4 py-3 text-zinc-500">Day {m.warmup_day}</td>
+                <td className="px-4 py-3">
+                  <div className="font-medium">{m.daily_send_limit} a day</div>
+                  <div className="text-xs text-zinc-500">
+                    {m.limited_by === "configured"
+                      ? `Held by the limit saved on this mailbox (${m.configured_limit}); warm-up would allow ${m.warmup_allows}`
+                      : m.limited_by === "warm-up"
+                        ? `Held by warm-up; the saved limit is ${m.configured_limit}`
+                        : m.configured_limit > 0 && m.configured_limit < m.daily_send_limit
+                          ? `Fully warmed up: sends up to ${m.daily_send_limit}/day. The saved limit (${m.configured_limit}) only applies while warming up`
+                          : "Fully warmed up"}
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-zinc-500">
+                  {m.warmed_up ? "Fully warmed up" : `Day ${m.warmup_day} · full volume in ~${m.days_until_warmed} days`}
+                </td>
+                <td className="px-4 py-3">
+                  {m.waiting_followups === 0 ? (
+                    <span className="text-zinc-400">None</span>
+                  ) : (
+                    <span
+                      title="Follow-ups always go out from the mailbox that sent the first email, so they wait for it instead of switching"
+                      className={m.stuck_followups > 0 ? "text-red-600" : "text-amber-700 dark:text-amber-400"}
+                    >
+                      {m.waiting_followups} waiting
+                      {m.stuck_followups > 0 ? ` · ${m.stuck_followups} stuck for 3+ days` : ""}
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() => setViewingMailbox(m)}

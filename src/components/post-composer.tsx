@@ -34,7 +34,7 @@ export default function PostComposer({ platforms }: { platforms: string[] }) {
   const [urls, setUrls] = useState<string[]>([]);
   const [urlDraft, setUrlDraft] = useState("");
   const [uploads, setUploads] = useState<Upload[]>([]);
-  const [mode, setMode] = useState<"now" | "schedule" | "draft">("draft");
+  const [mode, setMode] = useState<"now" | "schedule" | "draft">("now");
   const [scheduledFor, setScheduledFor] = useState("");
   const [busy, setBusy] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -93,9 +93,13 @@ export default function PostComposer({ platforms }: { platforms: string[] }) {
       const idea = data.idea ?? {};
       const tags = (idea.hashtags ?? []).map((h: string) => `#${String(h).replace(/^#/, "")}`).join(" ");
       setCaption([idea.caption, tags].filter(Boolean).join("\n\n"));
-      if (data.mediaUrl) setUrls([data.mediaUrl]);
-      setUploads([]);
-      if (fileRef.current) fileRef.current.value = "";
+      // Only replace the image if the user hasn't already uploaded their own.
+      // If they uploaded a photo first and then hit "Generate with AI", keep
+      // their image and only update the caption/hashtags.
+      const hasUserMedia = urls.length > 0 || uploads.length > 0;
+      if (data.mediaUrl && !hasUserMedia) {
+        setUrls([data.mediaUrl]);
+      }
       setResult({ ok: true, text: "Draft written from your Business Profile — review it, then publish." });
     } catch (err) {
       setResult({ ok: false, text: (err as Error).message });

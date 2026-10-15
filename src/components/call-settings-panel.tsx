@@ -39,7 +39,7 @@ export default function CallSettingsPanel({
   const [pinIsSet, setPinIsSet] = useState(pinSet);
   // "18:00:00" -> "18:00" for the time input.
   const [time, setTime] = useState((initial?.daily_call_time ?? "18:00:00").slice(0, 5));
-  const [tz, setTz] = useState(initial?.daily_call_timezone ?? "Asia/Karachi");
+  const [tz, setTz] = useState(initial?.daily_call_timezone ?? "");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 

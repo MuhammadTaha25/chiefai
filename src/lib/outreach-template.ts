@@ -4,7 +4,7 @@
  * supplies two short phrases (what we help with, what it means for them) - never the structure.
  *
  *   Hi {first_name},
- *   I came across {company} and noticed you're working in {industry}.
+ *   Since {company} works in {industry}, I thought this might be relevant.
  *   I'm reaching out because we help businesses {offer}.
  *   For a business like yours, this could mean {benefit}.
  *   Would you be open to a quick conversation to see whether this could be useful for {company}?
@@ -22,6 +22,8 @@ export interface TemplateVars {
   leadCompany: string;
   /** Recipient's industry, only when actually known. */
   industry?: string | null;
+  /** Recipient's job title, only when actually known. Used in the opener when the industry is not. */
+  jobTitle?: string | null;
   /** "automate repetitive tasks such as lead follow-ups and customer inquiries using AI" (a verb phrase). */
   offer: string;
   /** "less manual work and faster responses to potential customers" (a noun phrase). */
@@ -52,9 +54,14 @@ export function buildTemplateEmail(v: TemplateVars): { subject: string; body: st
   const company = tidy(v.leadCompany) || "your company";
   const industry = tidy(v.industry);
 
+  // Opener: the most specific fact we actually have. Industry wins (unchanged behaviour); otherwise the
+  // recipient's own job title; otherwise the generic line. Nothing is invented in any branch.
+  const title = tidy(v.jobTitle).slice(0, 80);
   const opener = industry
-    ? `I came across ${company} and noticed you're working in ${industry}.`
-    : `I came across ${company} and wanted to reach out.`;
+    ? `Since ${company} works in ${industry}, I thought this might be relevant.`
+    : title
+      ? `With your role as ${title} at ${company}, I thought this might be relevant.`
+      : `I'm getting in touch about ${company}.`;
 
   const lines = [
     `Hi ${first || "there"},`,

@@ -3,8 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isCronRequest } from "@/lib/webhook-security";
 import { generateAdVideo, generateSocialImage } from "@/lib/gemini";
-import { createStrategicItem, historyRow, loadContentHistory, publishToConnections, type StrategicItem } from "@/lib/social-content";
-import { dueItems, isValidTimeZone, localClock, slotKey, type ScheduleInput } from "@/lib/social-schedule";
+import { createStrategicItem, historyRow, imagePromptFallback, loadContentHistory, publishToConnections, type StrategicItem } from "@/lib/social-content";
+import { dueFromItems, dueItems, isValidTimeZone, localClock, parseWeeklyPlan, planItems, slotKey, weeklyItems, type ScheduleInput, type WeeklyPlan } from "@/lib/social-schedule";
 import { logEvent } from "@/lib/log-event";
 
 /**
@@ -42,8 +42,12 @@ interface AutomationRow {
   posts_per_week: number | null;
   stories_per_week: number | null;
   post_time: string | null;
+  story_time: string | null;
+  weekly_plan: unknown;
   timezone: string | null;
 }
+
+
 
 /**
  * Does this platform's configuration actually permit us to PUBLISH, or may we
@@ -79,7 +83,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ type
   }
 
   const admin = createAdminClient();
-  const defaultTz = process.env.CONTENT_TIMEZONE || "Asia/Karachi";
   const at = req.nextUrl.searchParams.get("at");
   // ?dry=1 reports which slots WOULD be generated (no generation, no publishing, no writes) — for checking a schedule.
   const dry = req.nextUrl.searchParams.get("dry") === "1";
@@ -87,7 +90,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ type
   const { data: automations, error: autoErr } = await admin
     .from("social_automation_settings")
     .select(
-      "client_id, platform, auto_create_enabled, auto_publish_enabled, stories_enabled, approval_mode, publish_mode, image_posts_per_week, carousel_posts_per_week, video_posts_per_week, posts_per_week, stories_per_week, post_time, timezone"
+      "client_id, platform, auto_create_enabled, auto_publish_enabled, stories_enabled, approval_mode, publish_mode, image_posts_per_week, carousel_posts_per_week, video_posts_per_week, posts_per_week, stories_per_week, post_time, story_time, weekly_plan, timezone"
     )
     .eq("automation_active", true)
     .in("platform", SUPPORTED)
@@ -139,11 +142,34 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ type
       stories: max(rows, (r) => r.stories_per_week),
       postsPerWeek: max(rows, (r) => r.posts_per_week),
       postTime: rows.map((r) => r.post_time).find(Boolean) ?? null,
+      storyTime: rows.map((r) => r.story_time).find(Boolean) ?? null,
     };
+    // The owner's per-day plan wins when it is saved; older settings fall back to the counts.
+    const weeklyPlan: WeeklyPlan | null = rows.map((r) => parseWeeklyPlan(r.weekly_plan)).find(Boolean) ?? null;
+    const planned = weeklyPlan ? planItems(weeklyPlan, input.postTime, input.storyTime) : weeklyItems(input);
     const tzPref = rows.map((r) => r.timezone).find(isValidTimeZone);
-    const clock = localClock(tzPref ?? defaultTz, new Date(), at);
+    // No Karachi fallback: posts run on the client's own clock, so a client without a timezone is skipped.
+    if (!tzPref) {
+      results.push({ client_id: clientId, slot: type, result: "skipped", detail: "client timezone not set" });
+      continue;
+    }
+    const clock = localClock(tzPref, new Date(), at);
 
-    for (const item of dueItems(input, clock, type)) {
+    // Log schedule state so timing issues can be diagnosed from Vercel logs.
+    const allSlots = planned.filter((it) => it.kind === type && it.weekday === clock.weekday);
+    logEvent("social_content.schedule_check", {
+      client_id: clientId,
+      kind: type,
+      local_time: `${String(Math.floor(clock.minutes / 60)).padStart(2, "0")}:${String(clock.minutes % 60).padStart(2, "0")}`,
+      date: clock.date,
+      post_time: input.postTime,
+      story_time: input.storyTime,
+      use_weekly_plan: weeklyPlan ? true : false,
+      slots_today: allSlots.map((it) => `${String(Math.floor(it.minutes / 60)).padStart(2, "0")}:${String(it.minutes % 60).padStart(2, "0")}`).join(","),
+    });
+
+    const due = weeklyPlan ? dueFromItems(planned, clock, type) : dueItems(input, clock, type);
+    for (const item of due) {
       const key = slotKey(type, clock.date, item.slot);
       const { data: existing } = await admin.from("social_posts").select("id").eq("client_id", clientId).eq("dedupe_key", key).limit(1);
       if (existing && existing.length) continue; // already generated for this slot
@@ -154,7 +180,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ type
 
       // Reserve the slot BEFORE the slow generation (unique on client_id + dedupe_key), so an overlapping
       // run or a retry cannot generate/publish the same slot twice.
-      const contentType = type === "story" ? "story" : item.format === "video" ? "video" : "image";
+      const isCarousel = type === "post" && item.format === "carousel";
+      const contentType = type === "story" ? "story" : item.format === "video" ? "video" : isCarousel ? "carousel" : "image";
       const { data: reserved, error: reserveErr } = await admin
         .from("social_posts")
         .insert({ client_id: clientId, platform: conns.map((c) => c.platform).join(","), content_type: contentType, status: "creating", dedupe_key: key })
@@ -179,7 +206,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ type
             .from("social_posts")
             .select("id, topic, hook, caption, cta, content_pillar, product_name, content_type, media_url")
             .eq("client_id", clientId)
-            .in("content_type", ["image", "video"])
+            .in("content_type", ["image", "video", "carousel"])
             .neq("status", "failed")
             .is("story_media_url", null)
             .gte("created_at", since)
@@ -194,6 +221,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ type
 
         const format = type === "story" ? "story" : item.format === "video" ? "video" : "image";
         const strategic: StrategicItem = await createStrategicItem({ ctx, history, format, supports });
+        // Carousel: three square slides in one visual style (cover, detail, call to action).
+        const slideNotes = ["Slide 1 of 3: the cover, with the strongest hook.", "Slide 2 of 3: the key detail or proof.", "Slide 3 of 3: a clear call to action."];
 
         // Media: feed video → Veo clip with the hook read aloud; story of a video post → that clip; otherwise an image.
         let media: { base64: string; mimeType: string; kind: "image" | "video" };
@@ -205,8 +234,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ type
           if (!dl.ok) throw new Error(`Could not fetch the video to reuse as a story: ${dl.status}`);
           media = { base64: Buffer.from(await dl.arrayBuffer()).toString("base64"), mimeType: dl.headers.get("content-type") ?? "video/mp4", kind: "video" };
         } else {
-          const prompt = format === "story" ? strategic.draft.storyImagePrompt : strategic.draft.imagePrompt || strategic.draft.storyImagePrompt || strategic.draft.topic;
-          media = { ...(await generateSocialImage((prompt || strategic.draft.topic).slice(0, 1200), format === "story" ? "9:16" : "1:1")), kind: "image" };
+          const prompt = format === "story" ? strategic.draft.storyImagePrompt : strategic.draft.imagePrompt || strategic.draft.storyImagePrompt;
+          media = { ...(await generateSocialImage((prompt || imagePromptFallback(ctx, strategic.draft.topic)).slice(0, 1200), format === "story" ? "9:16" : "1:1")), kind: "image" };
+        }
+
+        let extraSlides: { base64: string; mimeType: string }[] | undefined;
+        if (isCarousel) {
+          const base = strategic.draft.imagePrompt || imagePromptFallback(ctx, strategic.draft.topic);
+          const more: { base64: string; mimeType: string }[] = [];
+          for (const note of slideNotes.slice(1)) {
+            const img = await generateSocialImage(`${base}\n\n${note} Same style and palette as the other slides.`.slice(0, 1200), "1:1");
+            more.push(img);
+          }
+          extraSlides = more;
         }
 
         const published = await publishToConnections({
@@ -217,6 +257,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ type
             return row ? mayAutoPublish(row) : false;
           },
           media,
+          extraSlides,
           caption: strategic.caption,
           story: type === "story",
           filenameBase: key,

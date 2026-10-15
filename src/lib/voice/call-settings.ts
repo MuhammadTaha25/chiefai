@@ -37,7 +37,7 @@ export interface CallSettings {
 export const DEFAULTS: Omit<CallSettings, "personal_phone_number" | "daily_call_last_at" | "daily_call_last_slot"> = {
   daily_call_enabled: false,
   daily_call_time: "18:00",
-  daily_call_timezone: "Asia/Karachi",
+  daily_call_timezone: "",
 };
 
 /** Loose E.164: a leading + and 8–15 digits. */
@@ -75,6 +75,19 @@ export function localHourIn(tz: string): { date: string; hour: number; minute: n
   }
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
   return { date: `${get("year")}-${get("month")}-${get("day")}`, hour: Number(get("hour")), minute: Number(get("minute")) };
+}
+
+/** The local calendar date (YYYY-MM-DD) in `tz` of an ISO timestamp, or "" if unknown. */
+export function localDateAt(tz: string, iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(d);
+    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+    return `${get("year")}-${get("month")}-${get("day")}`;
+  } catch {
+    return "";
+  }
 }
 
 // --- storage detection -------------------------------------------------------

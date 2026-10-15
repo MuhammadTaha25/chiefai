@@ -46,15 +46,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const body = await req.json().catch(() => null);
   const action = body?.action;
-  if (action !== "publish" && action !== "discard") {
-    return NextResponse.json({ error: 'action must be "publish" or "discard"' }, { status: 400 });
+  if (action !== "publish" && action !== "discard" && action !== "pause" && action !== "resume") {
+    return NextResponse.json({ error: 'action must be "publish", "discard", "pause", or "resume"' }, { status: 400 });
   }
 
   // Scoped to the session's own client, so one tenant can never publish or
   // delete another tenant's campaign by guessing an id.
   const { data: campaign } = await supabase
     .from("ad_campaigns")
-    .select("id, client_id, platform, status, zernio_campaign_id, ad_id, launch_payload")
+    .select("id, client_id, platform, status, zernio_campaign_id, ad_id, launch_payload, launched_at")
     .eq("id", id)
     .eq("client_id", client.id)
     .maybeSingle<{
@@ -65,6 +65,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       zernio_campaign_id: string | null;
       ad_id: string | null;
       launch_payload: Record<string, unknown> | null;
+      launched_at: string | null;
     }>();
 
   if (!campaign) {
@@ -204,6 +205,69 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ ok: true, status: "launched", live: !pendingReview, pendingReview, metaStatus, note });
   }
 
+  // ---- pause ---------------------------------------------------------------
+  if (action === "pause") {
+    if (!["launched", "live"].includes(campaign.status)) {
+      return NextResponse.json(
+        { error: `Only a live campaign can be paused (this one is "${campaign.status}").` },
+        { status: 409 }
+      );
+    }
+    try {
+      await setCampaignStatusResilient(group, {
+        campaignId: campaign.zernio_campaign_id,
+        metaAdId: campaign.ad_id,
+        status: "paused",
+        platform: zernioPlatformFor(campaign.platform),
+      });
+    } catch (err) {
+      return NextResponse.json(
+        { error: `Could not pause: ${(err as Error).message.slice(0, 300)}` },
+        { status: 502 }
+      );
+    }
+    await admin
+      .from("ad_campaigns")
+      .update({ status: "paused", error_message: "Paused by the user." })
+      .eq("id", campaign.id);
+    return NextResponse.json({ ok: true, status: "paused" });
+  }
+
+  // ---- resume --------------------------------------------------------------
+  if (action === "resume") {
+    if (campaign.status !== "paused") {
+      return NextResponse.json(
+        { error: `Only a paused campaign can be resumed (this one is "${campaign.status}").` },
+        { status: 409 }
+      );
+    }
+    // Guard: if this was a paused DRAFT (never launched), don't use resume — use publish.
+    if (!campaign.launched_at) {
+      return NextResponse.json(
+        { error: 'This campaign was never published — use "Publish now" instead of resume.' },
+        { status: 409 }
+      );
+    }
+    try {
+      await setCampaignStatusResilient(group, {
+        campaignId: campaign.zernio_campaign_id,
+        metaAdId: campaign.ad_id,
+        status: "active",
+        platform: zernioPlatformFor(campaign.platform),
+      });
+    } catch (err) {
+      return NextResponse.json(
+        { error: `Could not resume: ${(err as Error).message.slice(0, 300)}` },
+        { status: 502 }
+      );
+    }
+    await admin
+      .from("ad_campaigns")
+      .update({ status: "launched", error_message: "Resumed by the user." })
+      .eq("id", campaign.id);
+    return NextResponse.json({ ok: true, status: "launched" });
+  }
+
   // ---- discard -------------------------------------------------------------
   try {
     // Repair Zernio's ad record first (see ensureZernioAdRecord): after a Facebook
@@ -236,4 +300,36 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .eq("campaign_id", campaign.id);
 
   return NextResponse.json({ ok: true, status: "declined", discarded: true });
+}
+
+/**
+ * Removes a failed or declined attempt from ChiefAI. Only rows that never reached
+ * the ads provider qualify, so a live, paused or published ad is never touched here.
+ */
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { user, client } = await getCurrentClient();
+  if (!user || !client) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+  const { id } = await params;
+  const admin = createAdminClient();
+  const { data: campaign } = await admin
+    .from("ad_campaigns")
+    .select("id, status, zernio_campaign_id")
+    .eq("id", id)
+    .eq("client_id", client.id)
+    .maybeSingle<{ id: string; status: string; zernio_campaign_id: string | null }>();
+  if (!campaign) return NextResponse.json({ error: "Ad campaign not found for this client" }, { status: 404 });
+
+  const removable = ["error", "declined", "rejected", "pending_human"];
+  if (campaign.zernio_campaign_id || !removable.includes(campaign.status)) {
+    return NextResponse.json(
+      { error: "Only failed or declined attempts that never reached the ads provider can be deleted here." },
+      { status: 409 }
+    );
+  }
+
+  await admin.from("ad_finance_decisions").delete().eq("ad_campaign_id", id);
+  const { error } = await admin.from("ad_campaigns").delete().eq("id", id).eq("client_id", client.id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
 }

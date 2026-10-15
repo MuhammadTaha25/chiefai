@@ -176,7 +176,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  await admin.from("campaigns").update({ status: "active", started_at: new Date().toISOString() }).eq("id", campaign.id);
+  await admin.from("campaigns").update({
+    status: "active",
+    started_at: new Date().toISOString(),
+    niche: clientConfig?.icp_industry ?? null,
+  }).eq("id", campaign.id);
 
   const query: ProspectQuery = {
     industries: clientConfig?.icp_industry ? [clientConfig.icp_industry] : [],

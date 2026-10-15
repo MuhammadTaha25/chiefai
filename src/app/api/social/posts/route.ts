@@ -169,8 +169,10 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // The account id comes from OUR row for THIS client — never from the browser.
-  const { data: connection } = await supabase
+  // Use admin client for connection lookup — avoids RLS gaps where a user row
+  // can't see its own social_connections if policies aren't perfectly set up.
+  const admin = createAdminClient();
+  const { data: connection } = await admin
     .from("social_connections")
     .select("zernio_account_id, connection_status")
     .eq("client_id", client.id)
@@ -181,29 +183,51 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Connect ${platform} before publishing to it.` }, { status: 400 });
   }
 
-  const admin = createAdminClient();
+  // If caller passes existing_post_id (publish-draft flow), reuse that row.
+  const existingPostId = typeof body.existing_post_id === "string" && body.existing_post_id
+    ? body.existing_post_id
+    : null;
 
-  // Record the intent first, so a failure AFTER Zernio accepted the post is
-  // still visible in the Content page rather than vanishing.
-  const { data: row, error: insertError } = await admin
-    .from("social_posts")
-    .insert({
-      client_id: client.id,
-      platform,
-      content_type: resolvedContentType(postType, [
-        ...urlsIn.map((u) => ({ type: mediaKindFromUrl(u), url: u })),
-        ...uploadsIn.map((u) => ({ type: mediaKind(u.mime), url: "" })),
-      ]),
-      topic: typeof body.topic === "string" ? body.topic : null,
-      caption,
-      media_url: urlsIn[0] ?? null,
-      status: "creating",
-    })
-    .select("id")
-    .single<{ id: string }>();
+  let row: { id: string };
 
-  if (insertError || !row) {
-    return NextResponse.json({ error: `Could not record the post: ${insertError?.message}` }, { status: 500 });
+  if (existingPostId) {
+    // Verify ownership
+    const { data: existing } = await admin
+      .from("social_posts")
+      .select("id, status")
+      .eq("id", existingPostId)
+      .eq("client_id", client.id)
+      .maybeSingle<{ id: string; status: string | null }>();
+
+    if (!existing) return NextResponse.json({ error: "Post not found" }, { status: 404 });
+    if (existing.status === "published") return NextResponse.json({ error: "Already published" }, { status: 400 });
+
+    await admin.from("social_posts").update({ status: "creating", caption: caption || undefined }).eq("id", existingPostId);
+    row = { id: existingPostId };
+  } else {
+    // Record the intent first, so a failure AFTER Zernio accepted the post is
+    // still visible in the Content page rather than vanishing.
+    const { data: inserted, error: insertError } = await admin
+      .from("social_posts")
+      .insert({
+        client_id: client.id,
+        platform,
+        content_type: resolvedContentType(postType, [
+          ...urlsIn.map((u) => ({ type: mediaKindFromUrl(u), url: u })),
+          ...uploadsIn.map((u) => ({ type: mediaKind(u.mime), url: "" })),
+        ]),
+        topic: typeof body.topic === "string" ? body.topic : null,
+        caption,
+        media_url: urlsIn[0] ?? null,
+        status: "creating",
+      })
+      .select("id")
+      .single<{ id: string }>();
+
+    if (insertError || !inserted) {
+      return NextResponse.json({ error: `Could not record the post: ${insertError?.message}` }, { status: 500 });
+    }
+    row = inserted;
   }
 
   try {
@@ -269,6 +293,8 @@ export async function POST(req: NextRequest) {
         content_type: resolvedContentType(postType, media),
         zernio_post_id: providerId,
         published_at: publishNow ? new Date().toISOString() : null,
+        // Persist the scheduled time so the Content page can display it.
+        ...(scheduledFor ? { scheduled_for: scheduledFor } : {}),
       })
       .eq("id", row.id);
 
