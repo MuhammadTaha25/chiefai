@@ -8,7 +8,7 @@ import { fetchCompanyDescriptionViaMcp } from "@/lib/vibe-prospecting-mcp";
 // No separate API key needed — falls back gracefully to null if not connected or any error.
 import { bareDomain, buildTemplateEmail } from "@/lib/outreach-template";
 import { renderCustomTemplate } from "@/lib/custom-template";
-import { cleanOutreachEmail, lintOutreachEmail, isPlaceholderCompanyName } from "@/lib/email-quality";
+import { cleanOutreachEmail, lintOutreachEmail } from "@/lib/email-quality";
 import { sendMail, mailgunDomainForAddress, getMailboxReadiness } from "@/lib/mailgun";
 import { withUnsubscribeFooter, unsubscribeHeaders } from "@/lib/compliance";
 import { resolveFirstFollowUpDelayMs } from "@/lib/follow-up-config";
@@ -216,10 +216,6 @@ export async function sendBatchForClient(clientId: string) {
   const sellingDescription = (job?.criteria?.what_you_sell as string | undefined)?.trim();
   if (!sellingDescription) {
     return { clientId, campaignId: campaign.id, result: "skipped", detail: "no saved outreach description (what_you_sell)" };
-  }
-
-  if (isPlaceholderCompanyName(clientRow?.company_name)) {
-    return { clientId, campaignId: campaign.id, result: "skipped", detail: "company name looks like a placeholder — set your real business name in settings" };
   }
 
   const context = await getClientBusinessContext(admin, clientId);

@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { sendMail, mailgunDomainForAddress } from "@/lib/mailgun";
 import { withUnsubscribeFooter, unsubscribeHeaders } from "@/lib/compliance";
 import { draftFollowUpEmail } from "@/lib/gemini";
-import { cleanOutreachEmail, lintOutreachEmail, isPlaceholderCompanyName } from "@/lib/email-quality";
+import { cleanOutreachEmail, lintOutreachEmail } from "@/lib/email-quality";
 import { autoSendSince } from "@/lib/campaign";
 import { resolveFollowUpIntervalMs, planFollowUp } from "@/lib/follow-up-config";
 import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
@@ -218,12 +218,6 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
         // daily so it resumes by itself once the client saves their outreach description.
         await deferFollowUp(admin, lead.id, NEEDS_ATTENTION_RETRY_MS);
         results.push({ leadId: lead.id, result: "skipped", detail: "no saved outreach description (what_you_sell) — will retry in 24h" });
-        continue;
-      }
-
-      if (isPlaceholderCompanyName(client?.company_name)) {
-        await deferFollowUp(admin, lead.id, NEEDS_ATTENTION_RETRY_MS);
-        results.push({ leadId: lead.id, result: "skipped", detail: "company name looks like a placeholder — set your real business name in settings; will retry in 24h" });
         continue;
       }
 

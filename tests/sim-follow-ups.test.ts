@@ -365,17 +365,3 @@ test("a spammy AI follow-up (\"free\") is never sent: redrafted, then deferred i
   assert.ok(S.leadRow(id(lead)).next_follow_up_at);
   assert.ok(S.ai.followUpCalls.length >= 2, "should have tried to redraft");
 });
-
-test("a placeholder company name (\"a\") blocks the send until a real name is saved", async () => {
-  const w = world();
-  const lead = S.seedSentLead(w.cid, w.mbId);
-  S.db.rows("clients").find((c) => c.id === w.cid)!.company_name = "a";
-  const r = await run(w.cid);
-  assert.equal(r.results[0].result, "skipped");
-  assert.equal(S.mailer.sent.length, 0);
-  assert.ok(S.leadRow(id(lead)).next_follow_up_at, "stays in the sequence");
-  S.db.rows("clients").find((c) => c.id === w.cid)!.company_name = "Infomist";
-  S.setClock(S.now() + 25 * S.HOUR);
-  const r2 = await run(w.cid);
-  assert.equal(r2.results[0].result, "sent");
-});
