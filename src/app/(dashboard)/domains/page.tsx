@@ -1,5 +1,5 @@
 import { headers } from "next/headers";
-import { effectiveDailyLimit } from "@/lib/mailbox-readiness";
+import { describeMailboxLimit } from "@/lib/mailbox-readiness";
 import { resolveAppOrigin } from "@/lib/app-url";
 import { getCurrentClient } from "@/lib/get-current-client";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -77,6 +77,46 @@ export default async function DomainsPage(props: {
   startOfToday.setHours(0, 0, 0, 0);
   const startOfMonth = new Date(startOfToday.getFullYear(), startOfToday.getMonth(), 1);
 
+  // Follow-ups never switch mailbox, so one that is overdue for more than an hour is waiting on ITS original
+  // mailbox (full for today, paused or not ready). Counted per mailbox so the table can show who is held up.
+  const WAITING_AFTER_MS = 60 * 60 * 1000;
+  const STUCK_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
+  const nowMs = new Date().getTime();
+  const { data: overdueLeads } = await supabase
+    .from("leads")
+    .select("id, next_follow_up_at")
+    .gte("follow_up_number", 1)
+    .eq("reply_received", false)
+    .eq("unsubscribed", false)
+    .eq("email_bounced", false)
+    .eq("booked", false)
+    .eq("complained", false)
+    .eq("manually_stopped", false)
+    .lte("next_follow_up_at", new Date(nowMs - WAITING_AFTER_MS).toISOString())
+    .limit(150)
+    .returns<{ id: string; next_follow_up_at: string }[]>();
+  const overdueIds = (overdueLeads ?? []).map((l) => l.id);
+  const { data: firstSends } = overdueIds.length
+    ? await supabase
+        .from("outreach_log")
+        .select("lead_id, mailbox_id")
+        .in("lead_id", overdueIds)
+        .not("mailbox_id", "is", null)
+        .order("sent_at", { ascending: true })
+        .returns<{ lead_id: string; mailbox_id: string }[]>()
+    : { data: [] as { lead_id: string; mailbox_id: string }[] };
+  const originalMailbox = new Map<string, string>();
+  for (const r of firstSends ?? []) if (!originalMailbox.has(r.lead_id)) originalMailbox.set(r.lead_id, r.mailbox_id);
+  const waitingByMailbox = new Map<string, { waiting: number; stuck: number }>();
+  for (const l of overdueLeads ?? []) {
+    const mb = originalMailbox.get(l.id);
+    if (!mb) continue;
+    const entry = waitingByMailbox.get(mb) ?? { waiting: 0, stuck: 0 };
+    entry.waiting += 1;
+    if (nowMs - new Date(l.next_follow_up_at).getTime() > STUCK_AFTER_MS) entry.stuck += 1;
+    waitingByMailbox.set(mb, entry);
+  }
+
   const mailboxes = await Promise.all(
     (mailboxRows ?? []).map(async (m) => {
       const [{ count: sentToday }, { count: sentThisMonth }] = await Promise.all([
@@ -93,11 +133,22 @@ export default async function DomainsPage(props: {
           .gte("sent_at", startOfMonth.toISOString()),
       ]);
 
+      const limit = describeMailboxLimit(m);
+      const waiting = waitingByMailbox.get(m.id);
       return {
         id: m.id,
         address: m.address,
-        daily_send_limit: effectiveDailyLimit(m),
-        warmup_day: m.warmup_day,
+        // The limit sending really uses today (lower of the saved limit and the age-based warm-up ceiling).
+        daily_send_limit: limit.effective,
+        configured_limit: limit.configured,
+        warmup_allows: limit.warmupAllows,
+        limited_by: limit.limitedBy,
+        // Real warm-up stage from the mailbox's age; the stored warmup_day is only ever set to 1.
+        warmup_day: limit.stageDay,
+        warmed_up: limit.warmedUp,
+        days_until_warmed: limit.daysUntilWarmed,
+        waiting_followups: waiting?.waiting ?? 0,
+        stuck_followups: waiting?.stuck ?? 0,
         sent_today: sentToday ?? 0,
         sent_this_month: sentThisMonth ?? 0,
         readiness: await getMailboxReadiness(m.address),

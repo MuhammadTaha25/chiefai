@@ -190,9 +190,9 @@ AIDA structure (but don't make it obvious — it should flow naturally):
 Voice & style:
 - Write like a real person emailing another real person — short, direct, no corporate speak
 - Vary sentence length naturally. Use contractions (we're, it's, you'd).
-- Opening: use their first name or business name — do NOT start with "I hope", "I came across", or "My name is"
-- Subject line: conversational and specific, like something a colleague would write (e.g. "quick question about [their business]" or "idea for [their company]") — lowercase preferred, under 8 words
-- 70–110 words total for the body. One short paragraph or two very short ones.
+- Opening: use their first name or business name — do NOT start with "I hope", "I came across", "I noticed", or "My name is"
+- Subject line: conversational and specific, like something a colleague would write (e.g. "quick question about [their business]" or "idea for [their company]") — lowercase preferred, 4–7 words (roughly 30–50 characters)
+- 55–80 words total for the body (shorter first emails get more replies). One short paragraph or two very short ones.
 - Plain text only. No bullet points, no bold, no links, no attachments.
 - Sign off casually: just the sender's first name or company name — no titles, no phone numbers
 - Never use: free, guarantee, act now, limited time, click here, buy now, 100%, risk-free, urgent, double your, cash, winner, "I wanted to reach out", "touch base", "circle back", "synergy"
@@ -398,10 +398,23 @@ export async function draftFollowUpEmail(params: {
   leadTitle?: string | null;
   leadIndustry?: string | null;
   followUpNumber: number;
+  /** True for the last follow-up the lead will get: it always uses the short "closing the loop" angle. */
+  isLastFollowUp?: boolean;
+  /** Text of the emails already sent to this lead (oldest first), so the model never repeats their wording. */
+  previousEmails?: { subject: string; body: string }[];
   tone?: string;
   businessContext?: string;
 }): Promise<AidaEmail> {
-  const angle = FOLLOW_UP_ANGLES[params.followUpNumber] ?? FOLLOW_UP_ANGLES[4];
+  // The final follow-up is always the closing-the-loop note (angle 4); earlier ones use angles 1, 2, 3 in order.
+  const angle = params.isLastFollowUp
+    ? FOLLOW_UP_ANGLES[4]
+    : (FOLLOW_UP_ANGLES[params.followUpNumber] ?? FOLLOW_UP_ANGLES[1]);
+  const earlier = (params.previousEmails ?? []).slice(-3);
+  const earlierBlock = earlier.length
+    ? `\n\nEmails we already sent this person (do NOT repeat their wording or pitch again):\n${earlier
+        .map((e, i) => `--- email ${i + 1} ---\n${untrusted(e.body, 600)}`)
+        .join("\n")}`
+    : "";
   const prompt = `${params.businessContext ? params.businessContext + "\n\n" : ""}You are an expert cold-email copywriter. Write follow-up #${params.followUpNumber} for ${params.senderCompany}.
 
 What we sell:
@@ -410,17 +423,18 @@ ${untrusted(params.sellingDescription)}
 """
 
 Recipient: ${untrusted(params.leadName, 200)} (${params.leadTitle ? untrusted(params.leadTitle, 100) : "unknown title"}) at ${untrusted(params.leadCompany, 200)}${params.leadIndustry ? `, industry: ${untrusted(params.leadIndustry, 100)}` : ""}.
-Tone: ${params.tone ?? "professional, warm, concise"}.
+Tone: ${params.tone ?? "casual, friendly, concise — like a quick note from a real person, not a campaign"}.${earlierBlock}
 
 ANGLE FOR THIS FOLLOW-UP (follow this exactly — this is what differentiates it from earlier emails in the sequence):
 ${angle}
 
 Hard rules:
-- Under 65 words total. Follow-ups must be shorter than the first email.
+- Under 50 words total. Follow-ups must be much shorter than the first email.
+- Write it as a short note continuing the same conversation (it is sent in the same email thread): do NOT re-introduce the company or repeat the original pitch.
 - Never start with "Just following up", "I wanted to", "I hope", or "I'm checking in".
 - No guilt-tripping. No fake urgency. No hype words.
-- No links, no markdown, plain text only.
-- Subject line: short (under 45 characters), conversational, references the company or their role — NOT a re-use of the first email's subject.
+- No links, no markdown, plain text only. One question at most.
+- Subject line: any short placeholder — the system replaces it with the original thread's subject.
 - Do not invent facts, stats, testimonials or results not in the business context.
 
 Respond with ONLY valid JSON matching exactly: {"subject": string, "body": string}`;

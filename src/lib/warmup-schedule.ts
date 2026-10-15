@@ -74,3 +74,44 @@ export function effectiveDailyLimit(
   // Fully warmed: configured limit wins (operator chose a higher cap).
   return Math.max(base, scheduleLimit);
 }
+
+/**
+ * Plain-language explanation of one mailbox's daily limit, for the Domains page. `warmup_day` stored on the
+ * mailbox is only ever set to 1 at creation, so the real stage comes from the mailbox's AGE, the same input the
+ * sending limit uses. `limitedBy` says which rule is holding sends back right now:
+ *   "configured" - the limit saved on the mailbox is lower than what warm-up would allow (or an operator's higher
+ *                  cap on a fully warmed mailbox), so raising it is what lets more email out;
+ *   "warm-up"    - the age-based ramp is the ceiling, whatever the saved limit says;
+ *   "none"       - fully warmed and not capped by the saved limit.
+ * Same assumptions as effectiveDailyLimit with a healthy mailbox.
+ */
+export function describeMailboxLimit(
+  m: { daily_send_limit: number | null; created_at?: string | null },
+  now = Date.now(),
+): {
+  ageDays: number;
+  stageDay: number;
+  warmedUp: boolean;
+  daysUntilWarmed: number;
+  warmupAllows: number;
+  configured: number;
+  effective: number;
+  limitedBy: "configured" | "warm-up" | "none";
+} {
+  const ageDays = m.created_at ? Math.max(0, Math.floor((now - new Date(m.created_at).getTime()) / 86400000)) : 0;
+  const warmupAllows = coldLimitForAge(ageDays);
+  const configured = Math.max(0, m.daily_send_limit ?? 0);
+  const effective = effectiveDailyLimit(m, now, true);
+  const warmedUp = warmupAllows >= WARMUP_CAP;
+  let daysUntilWarmed = 0;
+  if (!warmedUp) {
+    let d = ageDays;
+    while (coldLimitForAge(d) < WARMUP_CAP && d < ageDays + 365) d++;
+    daysUntilWarmed = d - ageDays;
+  }
+  let limitedBy: "configured" | "warm-up" | "none";
+  if (warmedUp) limitedBy = configured > warmupAllows ? "configured" : "none";
+  else if (configured === 0) limitedBy = "warm-up";
+  else limitedBy = configured < warmupAllows ? "configured" : "warm-up";
+  return { ageDays, stageDay: ageDays + 1, warmedUp, daysUntilWarmed, warmupAllows, configured, effective, limitedBy };
+}

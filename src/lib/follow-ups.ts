@@ -294,16 +294,17 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
       // message id from add_email_threading.sql). Missing/undefined is fine.
       // The "pending:" rows are mailbox-slot reservations (this run's own included, inserted a moment ago with
       // sent_at = now()); they are not real Message-Ids and would put a bogus In-Reply-To/References on the email.
-      const { data: prevSend } = await admin
+      const { data: priorSends } = await admin
         .from("outreach_log")
-        .select("provider_message_id")
+        .select("provider_message_id, subject, body")
         .eq("client_id", lead.client_id)
         .eq("lead_id", lead.id)
         .not("provider_message_id", "is", null)
         .not("provider_message_id", "like", "pending:%")
-        .order("sent_at", { ascending: false })
-        .limit(1)
-        .maybeSingle<{ provider_message_id: string }>();
+        .order("sent_at", { ascending: true })
+        .limit(10)
+        .returns<{ provider_message_id: string; subject: string | null; body: string | null }[]>();
+      const prevSend = priorSends && priorSends.length ? priorSends[priorSends.length - 1] : null;
       const draft = cleanOutreachEmail(await draftFollowUpEmail({
         businessContext,
         sellingDescription,
@@ -313,7 +314,13 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
         leadCompany: lead.company || "your company",
         // The drafter's angle table (gemini.ts FOLLOW_UP_ANGLES) is 1-based over follow-ups: 1 = first follow-up.
         followUpNumber: followUpIndex,
+        isLastFollowUp: isLast,
+        previousEmails: (priorSends ?? []).filter((p) => p.body).map((p) => ({ subject: p.subject ?? "", body: p.body ?? "" })),
       }));
+      // Same subject as the first email (no "Re:") so Gmail and other clients group every touch into ONE thread
+      // through the In-Reply-To header, without the fake-reply prefix that cold-email filters penalise.
+      const threadSubject = (priorSends ?? []).map((p) => (p.subject ?? "").trim()).find((s) => s && s !== "(sending)");
+      if (threadSubject) draft.subject = threadSubject;
 
       const sentMsg = await sendMail({
         inReplyTo: prevSend?.provider_message_id,

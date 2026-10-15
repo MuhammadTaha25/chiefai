@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getUnhealthyMailboxIds } from "@/lib/mailbox-health";
 import { getMailboxReadiness } from "@/lib/mailgun";
 import { effectiveDailyLimit } from "@/lib/warmup-schedule";
+import { followUpsPinnedTo, newEmailFits, originalMailboxByLead } from "@/lib/follow-up-capacity";
 
 /**
  * Picks a mailbox this client can actually send from — one whose Mailgun
@@ -55,7 +56,7 @@ export function startOfSendDay(): string {
   return d.toISOString();
 }
 
-export { WARMUP_CAP, coldLimitForAge, effectiveDailyLimit } from "@/lib/warmup-schedule";
+export { WARMUP_CAP, coldLimitForAge, effectiveDailyLimit, describeMailboxLimit } from "@/lib/warmup-schedule";
 
 export type MailboxReservation =
   | { ok: true; mailbox: { id: string; address: string }; reservationId: string }
@@ -73,6 +74,44 @@ async function salesSendsToday(admin: SupabaseClient, mailboxId: string): Promis
     .gte("touch_number", 1)
     .gte("sent_at", startOfSendDay());
   return count ?? 0;
+}
+
+/**
+ * Follow-ups still due today (or overdue) that are pinned to this mailbox because it sent their first email.
+ * New first emails leave room for them (see follow-up-capacity.ts). Any lookup problem counts as 0 so a database
+ * hiccup can never stop sending.
+ */
+async function dueFollowUpsPinnedTo(admin: SupabaseClient, clientId: string, mailboxId: string): Promise<number> {
+  try {
+    const endOfDay = new Date(new Date(startOfSendDay()).getTime() + 24 * 60 * 60 * 1000).toISOString();
+    const { data: due } = await admin
+      .from("leads")
+      .select("id")
+      .eq("client_id", clientId)
+      .gte("follow_up_number", 1)
+      .eq("reply_received", false)
+      .eq("unsubscribed", false)
+      .eq("email_bounced", false)
+      .eq("booked", false)
+      .eq("complained", false)
+      .eq("manually_stopped", false)
+      .lte("next_follow_up_at", endOfDay)
+      .limit(150)
+      .returns<{ id: string }[]>();
+    if (!due?.length) return 0;
+    const ids = due.map((d) => d.id);
+    const { data: firsts } = await admin
+      .from("outreach_log")
+      .select("lead_id, mailbox_id")
+      .eq("client_id", clientId)
+      .in("lead_id", ids)
+      .not("mailbox_id", "is", null)
+      .order("sent_at", { ascending: true })
+      .returns<{ lead_id: string; mailbox_id: string | null }[]>();
+    return followUpsPinnedTo(ids, originalMailboxByLead(firsts ?? []), mailboxId);
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -140,11 +179,16 @@ export async function reserveMailboxSlot(
   for (const m of ordered) {
     sawReady = true;
     const limit = effectiveDailyLimit(m, Date.now(), !unhealthy.has(m.id));
+    // A NEW first email (touch 1) only gets the slots left after the follow-ups still due today that are pinned
+    // to this mailbox, so follow-ups are not starved by new sends. Follow-ups themselves use the full limit.
+    const reservedForFollowUps = row.touch_number === 1 ? await dueFollowUpsPinnedTo(admin, clientId, m.id) : 0;
     // Contention can make every racing request back off at once (safe, but nobody wins); a short random
     // jitter and retry lets one of them through. The limit is re-checked on every attempt.
     for (let attempt = 0; attempt < 4; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, 40 + Math.random() * 160));
-    if ((await salesSendsToday(admin, m.id)) >= limit) break;
+    const usedNow = await salesSendsToday(admin, m.id);
+    if (usedNow >= limit) break;
+    if (reservedForFollowUps > 0 && !newEmailFits(usedNow, reservedForFollowUps, limit)) break;
 
     const { data: reserved, error } = await admin
       .from("outreach_log")
