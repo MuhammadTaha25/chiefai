@@ -81,6 +81,86 @@ export function frames(mulaw: Buffer, size = 160): Buffer[] {
 }
 const GREETING = loadGreeting();
 
+/** Opens the Gemini Live socket and sends the setup as soon as it is open. */
+function connectGemini(session: Record<string, unknown>, pinRequired: boolean, onOpen?: () => void): WebSocket {
+  const ws = new WebSocket(GEMINI_WS, { headers: { "x-goog-api-key": process.env.GEMINI_API_KEY! } });
+  const send = (msg: Record<string, unknown>) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); };
+  ws.on("open", () => {
+    onOpen?.();
+    send({
+      setup: {
+        model: `models/${liveModel()}`,
+        generationConfig: {
+          responseModalities: ["AUDIO"],
+          // Speed: by default the model is told not to "think" before speaking (measured: first audio ~10s -> ~2s).
+          // Set VOICE_THINKING_BUDGET to a number to change it, or to "default" to leave the model's own setting.
+          ...(process.env.VOICE_THINKING_BUDGET === "default"
+            ? {}
+            : { thinkingConfig: { thinkingBudget: Number(process.env.VOICE_THINKING_BUDGET ?? "0") || 0 } }),
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: process.env.VOICE_GEMINI_VOICE || "Kore" } } },
+        },
+        systemInstruction: { parts: [{ text: String(session.systemInstruction) }] },
+        tools: TOOLS,
+        // Normal talk: a short wait keeps replies snappy. While a PIN is being read out callers pause between digits, so wait longer.
+        realtimeInputConfig: { automaticActivityDetection: { endOfSpeechSensitivity: "END_SENSITIVITY_LOW", silenceDurationMs: pinRequired ? 900 : Number(process.env.VOICE_SILENCE_MS) || 500 } },
+        inputAudioTranscription: {},
+        outputAudioTranscription: {},
+      },
+    });
+  });
+  return ws;
+}
+
+/** Sessions prepared while the phone rings, keyed by client. Dropped after 90 s if nobody answers. */
+interface Prepared { session: Record<string, unknown>; ws: WebSocket; setupDone: boolean; reason: string; timer: NodeJS.Timeout }
+const preparedCalls = new Map<string, Prepared>();
+
+function dropPrepared(clientId: string, p?: Prepared): void {
+  const cur = preparedCalls.get(clientId);
+  if (!cur || (p && cur !== p)) return;
+  clearTimeout(cur.timer);
+  preparedCalls.delete(clientId);
+  try { cur.ws.close(); } catch { /* already closed */ }
+}
+
+function takePrepared(clientId: string, reason: string): Prepared | null {
+  const p = preparedCalls.get(clientId);
+  if (!p) return null;
+  clearTimeout(p.timer);
+  preparedCalls.delete(clientId);
+  const usable = p.reason === reason && (p.ws.readyState === WebSocket.OPEN || p.ws.readyState === WebSocket.CONNECTING);
+  if (!usable) { try { p.ws.close(); } catch { /* already closed */ } return null; }
+  return p;
+}
+
+async function prepareCall(clientId: string, reason: string, exp: number, token: string): Promise<void> {
+  dropPrepared(clientId);
+  const session = await appCall({ action: "start", client_id: clientId, reason, exp, token });
+  const ws = connectGemini(session, session.pinRequired === true);
+  const p: Prepared = { session, ws, setupDone: false, reason, timer: setTimeout(() => dropPrepared(clientId, p), 90_000) };
+  p.timer.unref?.();
+  ws.on("message", (raw) => { try { if (JSON.parse(raw.toString()).setupComplete) p.setupDone = true; } catch { /* ignore */ } });
+  ws.on("close", () => dropPrepared(clientId, p));
+  ws.on("error", () => dropPrepared(clientId, p));
+  preparedCalls.set(clientId, p);
+  console.log("[voice] pre-warming session while the phone rings");
+}
+
+function handlePrepare(req: http.IncomingMessage, res: http.ServerResponse): void {
+  let body = "";
+  req.on("data", (c) => { body += c; if (body.length > 10_000) req.destroy(); });
+  req.on("end", () => {
+    if (!secret() || req.headers["x-voice-secret"] !== secret()) { res.writeHead(401).end(); return; }
+    try {
+      const b = JSON.parse(body) as { client_id?: string; reason?: string; exp?: number; token?: string };
+      if (!b.client_id || !b.token) { res.writeHead(400).end(); return; }
+      res.writeHead(202).end("ok");
+      prepareCall(b.client_id, b.reason ?? "daily_report", Number(b.exp), b.token)
+        .catch((e) => console.warn(`[voice] pre-warm failed (call will start normally): ${(e as Error).message}`));
+    } catch { res.writeHead(400).end(); }
+  });
+}
+
 interface Twilio {
   event: string;
   start?: { streamSid: string; callSid: string; customParameters?: Record<string, string> };
@@ -151,48 +231,27 @@ function handleCall(twilio: WebSocket): void {
     clientId = params.client_id ?? "";
     const reason = params.reason ?? "inbound";
     direction = reason === "daily_report" ? "outbound" : "inbound";
-    const session = await appCall({ action: "start", client_id: clientId, reason, exp: Number(params.exp), token: params.token });
-    mark("app returned session");
+    const prepared = takePrepared(clientId, reason);
+    const session = prepared ? prepared.session : await appCall({ action: "start", client_id: clientId, reason, exp: Number(params.exp), token: params.token });
+    mark(prepared ? "using pre-warmed session" : "app returned session");
 
     pinRequired = session.pinRequired === true;
-    gemini = new WebSocket(GEMINI_WS, { headers: { "x-goog-api-key": process.env.GEMINI_API_KEY! } });
-    gemini.on("open", () => {
-      mark("gemini socket open");
-      sendGemini({
-        setup: {
-          model: `models/${liveModel()}`,
-          generationConfig: {
-            responseModalities: ["AUDIO"],
-            // Speed: by default the model is told not to "think" before speaking (measured: first audio ~10s -> ~2s).
-            // Set VOICE_THINKING_BUDGET to a number to change it, or to "default" to leave the model's own setting.
-            ...(process.env.VOICE_THINKING_BUDGET === "default"
-              ? {}
-              : { thinkingConfig: { thinkingBudget: Number(process.env.VOICE_THINKING_BUDGET ?? "0") || 0 } }),
-            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: process.env.VOICE_GEMINI_VOICE || "Kore" } } },
-          },
-          systemInstruction: { parts: [{ text: String(session.systemInstruction) }] },
-          tools: TOOLS,
-          // Normal talk: a short wait keeps replies snappy. While a PIN is being read out callers pause between digits, so wait longer.
-          realtimeInputConfig: { automaticActivityDetection: { endOfSpeechSensitivity: "END_SENSITIVITY_LOW", silenceDurationMs: pinRequired ? 900 : Number(process.env.VOICE_SILENCE_MS) || 500 } },
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
-        },
-      });
-    });
+    if (prepared) { gemini = prepared.ws; gemini.removeAllListeners("message"); gemini.removeAllListeners("close"); gemini.removeAllListeners("error"); }
+    else gemini = connectGemini(session, pinRequired, () => mark("gemini socket open"));
+    const onSetup = () => {
+      mark("gemini setup complete, sending opening");
+      ready = true;
+      for (const b of pending.splice(0)) sendGemini({ realtimeInput: { audio: { data: b.toString("base64"), mimeType: "audio/pcm;rate=16000" } } });
+      // The agent speaks first (daily brief, or a greeting on an inbound call).
+      const opening = String(session.opening) + (greeted ? " A short hello has ALREADY been played to the owner, so do not say hello again: go straight into the brief, starting with the time-of-day greeting only if it fits in a few words." : "");
+      sendGemini({ clientContent: { turns: [{ role: "user", parts: [{ text: opening }] }], turnComplete: true } });
+    };
 
     gemini.on("message", async (raw) => {
       let m: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
       try { m = JSON.parse(raw.toString()); } catch { return; }
 
-      if (m.setupComplete) {
-        mark("gemini setup complete, sending opening");
-        ready = true;
-        for (const b of pending.splice(0)) sendGemini({ realtimeInput: { audio: { data: b.toString("base64"), mimeType: "audio/pcm;rate=16000" } } });
-        // The agent speaks first (daily brief, or a greeting on an inbound call).
-        const opening = String(session.opening) + (greeted ? " A short hello has ALREADY been played to the owner, so do not say hello again: go straight into the brief, starting with the time-of-day greeting only if it fits in a few words." : "");
-        sendGemini({ clientContent: { turns: [{ role: "user", parts: [{ text: opening }] }], turnComplete: true } });
-        return;
-      }
+      if (m.setupComplete) { onSetup(); return; }
 
       const sc = m.serverContent;
       if (sc) {
@@ -244,6 +303,7 @@ function handleCall(twilio: WebSocket): void {
 
     gemini.on("close", () => void finish());
     gemini.on("error", (e) => { console.warn(`[voice] gemini error: ${e.message}`); void finish(); });
+    if (prepared?.setupDone) onSetup();
   }
 
   twilio.on("message", (raw) => {
@@ -273,7 +333,10 @@ export function startVoiceBridge(): boolean {
   if (process.env.VERCEL || !bridgeConfigured()) return false;
   g.__infomistVoiceBridge = true;
 
-  const server = http.createServer((_req, res) => { res.writeHead(200).end("infomist voice bridge"); });
+  const server = http.createServer((req, res) => {
+    if (req.method === "POST" && req.url === "/prepare") { handlePrepare(req, res); return; }
+    res.writeHead(200).end("infomist voice bridge");
+  });
   const wss = new WebSocketServer({ server, path: "/stream" });
   wss.on("connection", handleCall);
   server.on("error", (e) => console.warn(`[voice] bridge could not listen: ${e.message}`));
