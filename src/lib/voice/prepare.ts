@@ -1,4 +1,4 @@
-import { mintSessionToken, voiceSecret } from "./session-token";
+import { mintSessionToken, voiceSecret } from "./session-token.ts";
 
 /**
  * Pre-warm: while the owner's phone is still ringing, tell the voice bridge to fetch the session and open the
