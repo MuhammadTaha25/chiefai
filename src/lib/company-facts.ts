@@ -285,3 +285,22 @@ export async function getCompanyFacts(admin: SupabaseClient, clientId: string, t
     },
   };
 }
+
+
+// Short-lived per-instance cache so the call start does not pay for ~40 queries. The daily-call cron warms it
+// just before dialling; the phone then rings for several seconds, so the data is ready when the owner answers.
+// Best effort only: a different server instance (or an expired entry) simply computes fresh facts.
+const FACTS_TTL_MS = 120_000;
+const factsCache = new Map<string, { at: number; facts: Promise<CompanyFacts> }>();
+
+export function getCompanyFactsCached(admin: SupabaseClient, clientId: string, timezone = "UTC", now = Date.now()): Promise<CompanyFacts> {
+  const key = `${clientId}|${timezone}`;
+  const hit = factsCache.get(key);
+  if (hit && now - hit.at < FACTS_TTL_MS) return hit.facts;
+  const facts = getCompanyFacts(admin, clientId, timezone);
+  factsCache.set(key, { at: now, facts });
+  // A failed lookup must not be served from cache.
+  facts.catch(() => { if (factsCache.get(key)?.facts === facts) factsCache.delete(key); });
+  if (factsCache.size > 200) for (const [k, v] of factsCache) if (now - v.at >= FACTS_TTL_MS) factsCache.delete(k);
+  return facts;
+}

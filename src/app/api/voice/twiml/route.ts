@@ -131,8 +131,8 @@ export async function POST(req: NextRequest) {
         `<Parameter name="client_id" value="${xml(clientId)}"/><Parameter name="reason" value="${reason}"/>` +
         `<Parameter name="exp" value="${exp}"/><Parameter name="token" value="${token}"/>` +
         `</Stream></Connect>` +
-        // Only reached if the live stream ends abnormally: say so instead of a silent drop.
-        `<Say voice="Polly.Joanna">Sorry, the connection was lost. Please call again in a moment.</Say><Hangup/>`
+        // Reached whenever the stream ends, including a normal goodbye, so it must stay silent.
+        `<Hangup/>`
     );
   }
 

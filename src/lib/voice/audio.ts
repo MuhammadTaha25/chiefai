@@ -49,21 +49,37 @@ export class MulawToPcm16k {
   }
 }
 
+const TAPS = 31;
+/** Windowed-sinc low-pass, cutoff 3.6 kHz at 24 kHz: removes everything above the phone band before 3:1 decimation. */
+const LOWPASS: number[] = (() => {
+  const fc = 3600 / 24000;
+  const m = (TAPS - 1) / 2;
+  const h = Array.from({ length: TAPS }, (_, k) => {
+    const x = k - m;
+    const sinc = x === 0 ? 2 * fc : Math.sin(2 * Math.PI * fc * x) / (Math.PI * x);
+    return sinc * (0.54 - 0.46 * Math.cos((2 * Math.PI * k) / (TAPS - 1)));
+  });
+  const sum = h.reduce((a, b) => a + b, 0);
+  return h.map((v) => v / sum);
+})();
+
 /** Gemini PCM16 24 kHz (little-endian bytes) -> Twilio mu-law 8 kHz. Handles chunks that do not align to 3 samples. */
 export class Pcm24kToMulaw {
-  private carry: number[] = [];
+  // Filter history (TAPS-1 samples) followed by samples not yet consumed.
+  private buf: number[] = new Array(TAPS - 1).fill(0);
 
   convert(pcm: Buffer): Buffer {
-    const samples: number[] = this.carry;
-    this.carry = [];
-    for (let i = 0; i + 1 < pcm.length; i += 2) samples.push(pcm.readInt16LE(i));
-    const usable = samples.length - (samples.length % 3);
-    const out = Buffer.alloc(usable / 3);
-    for (let i = 0, o = 0; i < usable; i += 3, o++) {
-      // Box filter over 3 samples = cheap anti-alias before the 3:1 decimation.
-      out[o] = mulawEncodeSample(Math.round((samples[i] + samples[i + 1] + samples[i + 2]) / 3));
+    const buf = this.buf;
+    for (let i = 0; i + 1 < pcm.length; i += 2) buf.push(pcm.readInt16LE(i));
+    const outs: number[] = [];
+    let pos = TAPS - 1;
+    while (pos + 3 <= buf.length) {
+      let acc = 0;
+      for (let k = 0; k < TAPS; k++) acc += LOWPASS[k] * buf[pos + 2 - k];
+      outs.push(mulawEncodeSample(Math.max(-32768, Math.min(32767, Math.round(acc)))));
+      pos += 3;
     }
-    this.carry = samples.slice(usable);
-    return out;
+    this.buf = buf.slice(pos - (TAPS - 1));
+    return Buffer.from(outs);
   }
 }

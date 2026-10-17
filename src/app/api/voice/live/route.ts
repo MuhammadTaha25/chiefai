@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getCompanyFacts } from "@/lib/company-facts";
+import { getCompanyFacts, getCompanyFactsCached } from "@/lib/company-facts";
 import { answerCompanyQuestion } from "@/lib/gemini";
 import { getClientBusinessContext, formatBusinessContext } from "@/lib/business-context";
 import { getCallSettings } from "@/lib/voice/call-settings";
@@ -26,6 +26,7 @@ function instruction(business: string, report: string | null, reason: string, tz
   const locked = report === null; // inbound call on a PIN-protected line
   return [
     `You are the voice assistant of ${business}, speaking to its owner/CEO on the phone. Be warm, brief and natural — this is a phone call, not an essay.`,
+    `STYLE: sound like a relaxed, friendly human, not a script. Use short sentences (one idea each), contractions, and the occasional natural filler such as "okay", "so", "right" or "acha". Vary your pace and tone, and keep every answer to one or two short sentences unless asked for more. Never list things like a document; weave numbers into speech. Do not say you are an AI unless asked.`,
     `LANGUAGE: reply in whatever language the person speaks — English, Urdu, Hindi, Arabic, or a natural mix such as Roman-Urdu with English business words. Switch when they switch. Numbers and names may stay in English.`,
     `ACCURACY: only state figures that appear in REPORT below or that a tool returns. If something is not in them, say you do not have it. Never invent numbers, and never guess ad spend or ROI.`,
     locked
@@ -33,6 +34,8 @@ function instruction(business: string, report: string | null, reason: string, tz
       : outbound
       ? `This is the scheduled DAILY BRIEF call. Greet them in one short line, then read the report in a spoken, human way — lead with today's emails (and which mailboxes sent them), social posts and their times, domains, then leads, replies and deals. Skip nothing that is in the report, but do not read it like a list of numbers. Then ask if they want details on anything.`
       : `The owner has called you. Greet them in one short line and ask what they would like to know. Offer the daily brief if they want an overview.`,
+    `GOODBYE: if the owner says goodbye, bye or thanks-that-is-all at ANY point, even in the middle of the report, stop at once, say one short goodbye, and call end_call. Never restart or repeat the report after they have said goodbye.`,
+    `TOTALS vs TODAY: the report separates all-time totals from what happened today. Never mix them up in one sentence: say "41 emails so far, none today", not "41 emails sent, none from your mailboxes".`,
     `If they ask something the report does not cover, call ask_company. To refresh the numbers, call get_report. When they say goodbye or have nothing else, say a short goodbye and call end_call.`,
     `Owner's timezone: ${tz}. Right now it is ${new Date().toLocaleString("en-US", { timeZone: tz, weekday: "long", hour: "numeric", minute: "2-digit" })} for them — greet to match (say good morning only in the morning, good afternoon or good evening otherwise).`,
     `TIMES: every clock time in REPORT is already in the owner's timezone. Read each time exactly as written, including AM/PM, and never convert, shift or round it. If several posts have different times, say each one or say "between X and Y" using the exact first and last times.`,
@@ -56,12 +59,20 @@ export async function POST(req: NextRequest) {
         logEvent("voice.live", { result: "bad_token" });
         return NextResponse.json({ error: "Invalid session" }, { status: 401 });
       }
+      // Everything is fetched in parallel: the caller is waiting in silence while this runs.
+      const tStart = Date.now();
       const settings = await getCallSettings(admin, clientId);
-      const [facts, ctx] = await Promise.all([getCompanyFacts(admin, clientId, settings.daily_call_timezone), getClientBusinessContext(admin, clientId)]);
+      const tSettings = Date.now() - tStart;
+      const [facts, ctx, pinHash] = await Promise.all([
+        getCompanyFactsCached(admin, clientId, settings.daily_call_timezone),
+        getClientBusinessContext(admin, clientId),
+        reason !== "daily_report" ? getPinHash(admin, clientId) : Promise.resolve(null),
+      ]);
+      const tFetched = Date.now() - tStart;
       const business = ctx.businessName ?? "your business";
       // Inbound + PIN set: hold the report back entirely until the PIN is verified.
-      const pinRequired = reason !== "daily_report" && Boolean(await getPinHash(admin, clientId));
-      logEvent("voice.live", { client_id: clientId, result: "start", reason, pin: pinRequired });
+      const pinRequired = Boolean(pinHash);
+      logEvent("voice.live", { client_id: clientId, result: "start", reason, pin: pinRequired, settings_ms: tSettings, fetched_ms: tFetched });
       return NextResponse.json({
         ok: true,
         reason,

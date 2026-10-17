@@ -1,6 +1,6 @@
 import http from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
-import { MulawToPcm16k, Pcm24kToMulaw } from "./audio";
+import { MulawToPcm16k, Pcm24kToMulaw } from "./audio.ts";
 
 /**
  * Live voice bridge: Twilio Media Stream  <->  Gemini 2.5 native audio (Live API).
@@ -117,26 +117,39 @@ function handleCall(twilio: WebSocket): void {
     if (gemini?.readyState === WebSocket.OPEN) gemini.send(JSON.stringify(msg));
   };
 
+  // Timing (ms since the stream opened) so a slow start can be pinned on the right step.
+  const t0 = Date.now();
+  let firstAudioLogged = false;
+  const mark = (what: string) => console.log(`[voice] +${Date.now() - t0}ms ${what}`);
+
   async function begin(params: Record<string, string>) {
+    mark("stream started");
     clientId = params.client_id ?? "";
     const reason = params.reason ?? "inbound";
     direction = reason === "daily_report" ? "outbound" : "inbound";
     const session = await appCall({ action: "start", client_id: clientId, reason, exp: Number(params.exp), token: params.token });
+    mark("app returned session");
 
     pinRequired = session.pinRequired === true;
     gemini = new WebSocket(GEMINI_WS, { headers: { "x-goog-api-key": process.env.GEMINI_API_KEY! } });
     gemini.on("open", () => {
+      mark("gemini socket open");
       sendGemini({
         setup: {
           model: `models/${liveModel()}`,
           generationConfig: {
             responseModalities: ["AUDIO"],
+            // Speed: by default the model is told not to "think" before speaking (measured: first audio ~10s -> ~2s).
+            // Set VOICE_THINKING_BUDGET to a number to change it, or to "default" to leave the model's own setting.
+            ...(process.env.VOICE_THINKING_BUDGET === "default"
+              ? {}
+              : { thinkingConfig: { thinkingBudget: Number(process.env.VOICE_THINKING_BUDGET ?? "0") || 0 } }),
             speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: process.env.VOICE_GEMINI_VOICE || "Kore" } } },
           },
           systemInstruction: { parts: [{ text: String(session.systemInstruction) }] },
           tools: TOOLS,
-          // Phone callers pause mid-sentence (and mid-PIN): wait a little longer before deciding they are done.
-          realtimeInputConfig: { automaticActivityDetection: { endOfSpeechSensitivity: "END_SENSITIVITY_LOW", silenceDurationMs: 900 } },
+          // Normal talk: a short wait keeps replies snappy. While a PIN is being read out callers pause between digits, so wait longer.
+          realtimeInputConfig: { automaticActivityDetection: { endOfSpeechSensitivity: "END_SENSITIVITY_LOW", silenceDurationMs: pinRequired ? 900 : Number(process.env.VOICE_SILENCE_MS) || 500 } },
           inputAudioTranscription: {},
           outputAudioTranscription: {},
         },
@@ -148,6 +161,7 @@ function handleCall(twilio: WebSocket): void {
       try { m = JSON.parse(raw.toString()); } catch { return; }
 
       if (m.setupComplete) {
+        mark("gemini setup complete, sending opening");
         ready = true;
         for (const b of pending.splice(0)) sendGemini({ realtimeInput: { audio: { data: b.toString("base64"), mimeType: "audio/pcm;rate=16000" } } });
         // The agent speaks first (daily brief, or a greeting on an inbound call).
@@ -159,6 +173,7 @@ function handleCall(twilio: WebSocket): void {
       if (sc) {
         for (const p of sc.modelTurn?.parts ?? []) {
           if (p.inlineData?.data) {
+            if (!firstAudioLogged) { firstAudioLogged = true; mark("FIRST AUDIO from gemini"); }
             const mulaw = down.convert(Buffer.from(p.inlineData.data, "base64"));
             if (mulaw.length) sendToTwilio({ event: "media", media: { payload: mulaw.toString("base64") } });
           }
@@ -237,6 +252,6 @@ export function startVoiceBridge(): boolean {
   const wss = new WebSocketServer({ server, path: "/stream" });
   wss.on("connection", handleCall);
   server.on("error", (e) => console.warn(`[voice] bridge could not listen: ${e.message}`));
-  server.listen(bridgePort(), "127.0.0.1", () => console.log(`[voice] Gemini live bridge on :${bridgePort()} (${liveModel()})`));
+  server.listen(bridgePort(), process.env.VOICE_BRIDGE_HOST || "127.0.0.1", () => console.log(`[voice] Gemini live bridge on :${bridgePort()} (${liveModel()})`));
   return true;
 }

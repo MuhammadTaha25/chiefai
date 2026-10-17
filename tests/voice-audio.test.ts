@@ -21,3 +21,17 @@ test("24k pcm becomes 8k mu-law, carrying a partial group across chunks", () => 
   assert.equal(a.length, 1);
   assert.equal(b.length, 1);
 });
+
+test("downsampler removes content above the phone band and keeps speech-band tone", () => {
+  const rms = (hz: number) => {
+    const n = 2400; // 100 ms at 24 kHz
+    const b = Buffer.alloc(n * 2);
+    for (let i = 0; i < n; i++) b.writeInt16LE(Math.round(10000 * Math.sin((2 * Math.PI * hz * i) / 24000)), i * 2);
+    const out = new Pcm24kToMulaw().convert(b);
+    let e = 0;
+    for (let i = 20; i < out.length; i++) e += mulawDecodeSample(out[i]) ** 2;
+    return Math.sqrt(e / (out.length - 20));
+  };
+  assert.ok(rms(1000) > 5000, "1 kHz tone passes");
+  assert.ok(rms(9000) < 500, "9 kHz tone is filtered out");
+});
