@@ -162,6 +162,8 @@ export async function draftAidaEmail(params: {
   leadTitle: string | null;
   leadCity?: string | null;
   leadCountry?: string | null;
+  /** The lead's own industry, when known. The email must be about THIS industry and no other. */
+  leadIndustry?: string | null;
   tone?: string;
   callToAction?: string;
   businessContext?: string;
@@ -176,6 +178,8 @@ export async function draftAidaEmail(params: {
     const loc = [params.leadCity, params.leadCountry].filter(Boolean).join(", ");
     leadLines.push(`- Location: ${untrusted(loc, 200)}`);
   }
+  if (params.leadIndustry) leadLines.push(`- Industry: ${untrusted(params.leadIndustry, 100)} (the email MUST be relevant to this industry only; never mention or imply any other industry)`);
+  else leadLines.push("- Industry: unknown — do NOT guess or name an industry; keep the email industry-neutral");
   if (params.businessContext) leadLines.push(`\nExtra context:\n${params.businessContext}`);
 
   const prompt = `You are writing a cold outreach email on behalf of ${params.senderCompany}. This email must sound like it was written by a real human salesperson — natural, conversational, brief. Not a template. Not AI-generated.
@@ -449,6 +453,7 @@ Hard rules:
 - No links, no markdown, plain text only. One question at most.
 - Subject line: any short placeholder — the system replaces it with the original thread's subject.
 - Do not invent facts, stats, testimonials or results not in the business context. Never write a number of hours, a percentage, or phrases like "clients report" / "customers say".
+- ${params.leadIndustry ? `The recipient works in ${untrusted(params.leadIndustry, 100)}: keep every line relevant to that industry and never mention or imply a different one.` : "The recipient's industry is unknown: do not guess or name an industry."}
 - Keep a mini AIDA flow in 30-50 words: a fresh attention line, one benefit or problem, one soft question.
 
 ${SPAM_SAFE_RULES}

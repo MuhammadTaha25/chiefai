@@ -48,6 +48,7 @@ interface DueLead {
   email: string;
   follow_up_number: number | null;
   next_follow_up_at: string | null;
+  industry: string | null;
 }
 
 // Max leads processed per client per cron run — caps one client's share so a
@@ -80,7 +81,7 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
   function baseQuery() {
     let q = admin
       .from("leads")
-      .select("id, client_id, campaign_id, name, company, email, follow_up_number, next_follow_up_at")
+      .select("id, client_id, campaign_id, name, company, email, follow_up_number, next_follow_up_at, industry")
       .gte("follow_up_number", 1) // only a lead whose initial email was actually sent can get a follow-up
       .eq("reply_received", false)
       .eq("unsubscribed", false)
@@ -312,6 +313,7 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
         // Directory leads are businesses: their "name" is the company name, so greet generically.
         leadName: (lead.name ?? "").trim().toLowerCase() === (lead.company ?? "").trim().toLowerCase() ? "there" : lead.name || "there",
         leadCompany: lead.company || "your company",
+        leadIndustry: lead.industry,
         // The drafter's angle table (gemini.ts FOLLOW_UP_ANGLES) is 1-based over follow-ups: 1 = first follow-up.
         followUpNumber: followUpIndex,
         isLastFollowUp: isLast,
@@ -320,10 +322,10 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
       // Never send a follow-up that trips the spam checks (e.g. "free"): redraft a few times, then defer the lead.
       const earlierBodies = (priorSends ?? []).map((p) => p.body ?? "").filter(Boolean);
       let draft = cleanOutreachEmail(await draftFollowUpEmail(draftParams));
-      let lintIssues = lintOutreachEmail(draft, { firstTouch: false, earlierBodies });
+      let lintIssues = lintOutreachEmail(draft, { firstTouch: false, earlierBodies, industry: lead.industry });
       for (let attempt = 0; lintIssues.length && attempt < 2; attempt++) {
         draft = cleanOutreachEmail(await draftFollowUpEmail(draftParams));
-        lintIssues = lintOutreachEmail(draft, { firstTouch: false, earlierBodies });
+        lintIssues = lintOutreachEmail(draft, { firstTouch: false, earlierBodies, industry: lead.industry });
       }
       if (lintIssues.length) throw new Error(`Follow-up draft failed spam checks: ${lintIssues.join("; ")}`);
       // Same subject as the first email (no "Re:") so Gmail and other clients group every touch into ONE thread
