@@ -58,16 +58,19 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Invalid session" }, { status: 401 });
       }
       // Everything is fetched in parallel: the caller is waiting in silence while this runs.
+      const tStart = Date.now();
       const settings = await getCallSettings(admin, clientId);
+      const tSettings = Date.now() - tStart;
       const [facts, ctx, pinHash] = await Promise.all([
         getCompanyFacts(admin, clientId, settings.daily_call_timezone),
         getClientBusinessContext(admin, clientId),
         reason !== "daily_report" ? getPinHash(admin, clientId) : Promise.resolve(null),
       ]);
+      const tFetched = Date.now() - tStart;
       const business = ctx.businessName ?? "your business";
       // Inbound + PIN set: hold the report back entirely until the PIN is verified.
       const pinRequired = Boolean(pinHash);
-      logEvent("voice.live", { client_id: clientId, result: "start", reason, pin: pinRequired });
+      logEvent("voice.live", { client_id: clientId, result: "start", reason, pin: pinRequired, settings_ms: tSettings, fetched_ms: tFetched });
       return NextResponse.json({
         ok: true,
         reason,

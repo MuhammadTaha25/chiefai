@@ -139,6 +139,10 @@ function handleCall(twilio: WebSocket): void {
           model: `models/${liveModel()}`,
           generationConfig: {
             responseModalities: ["AUDIO"],
+            // Opt-in speed experiment: VOICE_THINKING_BUDGET=0 asks the model not to "think" before speaking.
+            ...(process.env.VOICE_THINKING_BUDGET !== undefined && process.env.VOICE_THINKING_BUDGET !== ""
+              ? { thinkingConfig: { thinkingBudget: Number(process.env.VOICE_THINKING_BUDGET) } }
+              : {}),
             speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: process.env.VOICE_GEMINI_VOICE || "Kore" } } },
           },
           systemInstruction: { parts: [{ text: String(session.systemInstruction) }] },
