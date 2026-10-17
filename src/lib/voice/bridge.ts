@@ -135,8 +135,8 @@ function handleCall(twilio: WebSocket): void {
           },
           systemInstruction: { parts: [{ text: String(session.systemInstruction) }] },
           tools: TOOLS,
-          // Phone callers pause mid-sentence (and mid-PIN): wait a little longer before deciding they are done.
-          realtimeInputConfig: { automaticActivityDetection: { endOfSpeechSensitivity: "END_SENSITIVITY_LOW", silenceDurationMs: 900 } },
+          // Normal talk: a short wait keeps replies snappy. While a PIN is being read out callers pause between digits, so wait longer.
+          realtimeInputConfig: { automaticActivityDetection: { endOfSpeechSensitivity: "END_SENSITIVITY_LOW", silenceDurationMs: pinRequired ? 900 : Number(process.env.VOICE_SILENCE_MS) || 500 } },
           inputAudioTranscription: {},
           outputAudioTranscription: {},
         },

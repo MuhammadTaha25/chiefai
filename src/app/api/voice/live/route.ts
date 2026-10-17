@@ -26,6 +26,7 @@ function instruction(business: string, report: string | null, reason: string, tz
   const locked = report === null; // inbound call on a PIN-protected line
   return [
     `You are the voice assistant of ${business}, speaking to its owner/CEO on the phone. Be warm, brief and natural — this is a phone call, not an essay.`,
+    `STYLE: sound like a relaxed, friendly human, not a script. Use short sentences (one idea each), contractions, and the occasional natural filler such as "okay", "so", "right" or "acha". Vary your pace and tone, and keep every answer to one or two short sentences unless asked for more. Never list things like a document; weave numbers into speech. Do not say you are an AI unless asked.`,
     `LANGUAGE: reply in whatever language the person speaks — English, Urdu, Hindi, Arabic, or a natural mix such as Roman-Urdu with English business words. Switch when they switch. Numbers and names may stay in English.`,
     `ACCURACY: only state figures that appear in REPORT below or that a tool returns. If something is not in them, say you do not have it. Never invent numbers, and never guess ad spend or ROI.`,
     locked
@@ -56,11 +57,16 @@ export async function POST(req: NextRequest) {
         logEvent("voice.live", { result: "bad_token" });
         return NextResponse.json({ error: "Invalid session" }, { status: 401 });
       }
+      // Everything is fetched in parallel: the caller is waiting in silence while this runs.
       const settings = await getCallSettings(admin, clientId);
-      const [facts, ctx] = await Promise.all([getCompanyFacts(admin, clientId, settings.daily_call_timezone), getClientBusinessContext(admin, clientId)]);
+      const [facts, ctx, pinHash] = await Promise.all([
+        getCompanyFacts(admin, clientId, settings.daily_call_timezone),
+        getClientBusinessContext(admin, clientId),
+        reason !== "daily_report" ? getPinHash(admin, clientId) : Promise.resolve(null),
+      ]);
       const business = ctx.businessName ?? "your business";
       // Inbound + PIN set: hold the report back entirely until the PIN is verified.
-      const pinRequired = reason !== "daily_report" && Boolean(await getPinHash(admin, clientId));
+      const pinRequired = Boolean(pinHash);
       logEvent("voice.live", { client_id: clientId, result: "start", reason, pin: pinRequired });
       return NextResponse.json({
         ok: true,
