@@ -4,6 +4,7 @@ import { isCronRequest } from "@/lib/webhook-security";
 import { selectVoiceProvider, voiceReadiness } from "@/lib/voice/select";
 import { getCallSettings, setCallSettings, localHourIn } from "@/lib/voice/call-settings";
 import { logEvent } from "@/lib/log-event";
+import { getCompanyFactsCached } from "@/lib/company-facts";
 
 /**
  * The daily report call.
@@ -107,6 +108,9 @@ async function run(req: NextRequest) {
       results.push({ client_id: row.client_id, result: "would_call", detail: `${row.twilio_number} -> ${settings.personal_phone_number} at ${settings.daily_call_time} ${tz}` });
       continue;
     }
+
+    // Warm the report while the phone rings (best effort; never blocks or fails the call).
+    void getCompanyFactsCached(admin, row.client_id, tz).catch(() => undefined);
 
     try {
       const { callSid } = await provider.placeCall({

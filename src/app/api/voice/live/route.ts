@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getCompanyFacts } from "@/lib/company-facts";
+import { getCompanyFacts, getCompanyFactsCached } from "@/lib/company-facts";
 import { answerCompanyQuestion } from "@/lib/gemini";
 import { getClientBusinessContext, formatBusinessContext } from "@/lib/business-context";
 import { getCallSettings } from "@/lib/voice/call-settings";
@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
       const settings = await getCallSettings(admin, clientId);
       const tSettings = Date.now() - tStart;
       const [facts, ctx, pinHash] = await Promise.all([
-        getCompanyFacts(admin, clientId, settings.daily_call_timezone),
+        getCompanyFactsCached(admin, clientId, settings.daily_call_timezone),
         getClientBusinessContext(admin, clientId),
         reason !== "daily_report" ? getPinHash(admin, clientId) : Promise.resolve(null),
       ]);
