@@ -7,6 +7,8 @@ import { draftFollowUpEmail } from "@/lib/gemini";
 import { cleanOutreachEmail, lintOutreachEmail } from "@/lib/email-quality";
 import { autoSendSince } from "@/lib/campaign";
 import { resolveFollowUpIntervalMs, planFollowUp } from "@/lib/follow-up-config";
+import { resolveSendWindow, withinSendWindow } from "@/lib/send-window";
+import { isValidTimeZone, localClock } from "@/lib/social-schedule";
 import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
 
 // Cadence between stages comes from follow-up-config.ts (client-configurable
@@ -48,6 +50,7 @@ interface DueLead {
   email: string;
   follow_up_number: number | null;
   next_follow_up_at: string | null;
+  industry: string | null;
 }
 
 // Max leads processed per client per cron run — caps one client's share so a
@@ -80,7 +83,7 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
   function baseQuery() {
     let q = admin
       .from("leads")
-      .select("id, client_id, campaign_id, name, company, email, follow_up_number, next_follow_up_at")
+      .select("id, client_id, campaign_id, name, company, email, follow_up_number, next_follow_up_at, industry")
       .gte("follow_up_number", 1) // only a lead whose initial email was actually sent can get a follow-up
       .eq("reply_received", false)
       .eq("unsubscribed", false)
@@ -149,6 +152,7 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
   }
 
   const results: FollowUpResult[] = [];
+  if (isCron) await recoverOrphanedFollowUps(admin);
   // Soft time budget so one run stays inside a short serverless limit; anything
   // not reached keeps its next_follow_up_at and is picked up by the next run.
   const runStartedAt = Date.now();
@@ -162,9 +166,37 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
     externalDomainsByClient.set(clientId, fresh);
     return fresh;
   }
+  // Follow-ups only go out inside the client's own daytime send window (same window and timezone as first emails),
+  // so nobody gets a follow-up at 3am. Outside it the lead is left untouched and the next 5-minute run retries.
+  // A client with no valid timezone has no window we can trust, so it is not blocked.
+  const windowOpenByKey = new Map<string, boolean>();
+  async function windowOpen(clientId: string, campaignId: string | null): Promise<boolean> {
+    const key = `${clientId}|${campaignId ?? ""}`;
+    const cached = windowOpenByKey.get(key);
+    if (cached !== undefined) return cached;
+    const [{ data: c }, { data: camp }] = await Promise.all([
+      admin.from("clients").select("timezone, outreach_send_start, outreach_send_end").eq("id", clientId).maybeSingle<{ timezone: string | null; outreach_send_start: string | null; outreach_send_end: string | null }>(),
+      campaignId
+        ? admin.from("campaigns").select("timezone, send_window_start, send_window_end").eq("id", campaignId).maybeSingle<{ timezone: string | null; send_window_start: string | null; send_window_end: string | null }>()
+        : Promise.resolve({ data: null }),
+    ]);
+    const tz = camp?.timezone ?? c?.timezone;
+    let open = true;
+    if (isValidTimeZone(tz)) {
+      const w = resolveSendWindow(camp?.send_window_start ?? c?.outreach_send_start, camp?.send_window_end ?? c?.outreach_send_end);
+      open = withinSendWindow(w, localClock(tz).minutes);
+    }
+    windowOpenByKey.set(key, open);
+    return open;
+  }
+
   for (const lead of dueLeads ?? []) {
     if (Date.now() - runStartedAt > 45_000) break;
     try {
+      if (!(await windowOpen(lead.client_id, lead.campaign_id))) {
+        results.push({ leadId: lead.id, result: "skipped", detail: "outside the client's send window - waiting for the window to open" });
+        continue;
+      }
       // Atomic claim: only proceed if next_follow_up_at is still exactly
       // what we just read it AND every stop condition (spec §18 priority
       // list) is still false at this exact instant — not just what the
@@ -256,6 +288,12 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
         { touch_number: nextFollowUpNumber, campaign_id: lead.campaign_id },
         { mailboxId: firstSend.mailbox_id },
       );
+      if (!reservation.ok && reservation.reason === "duplicate_touch") {
+        // This follow-up was already sent (or is being sent): never send it twice. Check again in a day.
+        await deferFollowUp(admin, lead.id, NEEDS_ATTENTION_RETRY_MS);
+        results.push({ leadId: lead.id, result: "skipped", detail: "this follow-up already exists for the lead - not sending a duplicate" });
+        continue;
+      }
       if (!reservation.ok) {
         await admin.from("leads").update({ next_follow_up_at: lead.next_follow_up_at }).eq("id", lead.id).is("next_follow_up_at", null);
         results.push({
@@ -312,6 +350,7 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
         // Directory leads are businesses: their "name" is the company name, so greet generically.
         leadName: (lead.name ?? "").trim().toLowerCase() === (lead.company ?? "").trim().toLowerCase() ? "there" : lead.name || "there",
         leadCompany: lead.company || "your company",
+        leadIndustry: lead.industry,
         // The drafter's angle table (gemini.ts FOLLOW_UP_ANGLES) is 1-based over follow-ups: 1 = first follow-up.
         followUpNumber: followUpIndex,
         isLastFollowUp: isLast,
@@ -320,10 +359,10 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
       // Never send a follow-up that trips the spam checks (e.g. "free"): redraft a few times, then defer the lead.
       const earlierBodies = (priorSends ?? []).map((p) => p.body ?? "").filter(Boolean);
       let draft = cleanOutreachEmail(await draftFollowUpEmail(draftParams));
-      let lintIssues = lintOutreachEmail(draft, { firstTouch: false, earlierBodies });
+      let lintIssues = lintOutreachEmail(draft, { firstTouch: false, earlierBodies, industry: lead.industry });
       for (let attempt = 0; lintIssues.length && attempt < 2; attempt++) {
         draft = cleanOutreachEmail(await draftFollowUpEmail(draftParams));
-        lintIssues = lintOutreachEmail(draft, { firstTouch: false, earlierBodies });
+        lintIssues = lintOutreachEmail(draft, { firstTouch: false, earlierBodies, industry: lead.industry });
       }
       if (lintIssues.length) throw new Error(`Follow-up draft failed spam checks: ${lintIssues.join("; ")}`);
       // Same subject as the first email (no "Re:") so Gmail and other clients group every touch into ONE thread
@@ -381,3 +420,53 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
 }
 
 export type FollowUpResult = { leadId: string; result: "sent" | "capped" | "skipped" | "error"; detail?: string };
+
+
+/**
+ * A follow-up claims its lead by clearing next_follow_up_at. If the run dies (timeout, crash) between that claim and the
+ * reschedule, the lead is left with no schedule and would never be followed up. This puts such leads back in the queue.
+ * Deliberately conservative: only leads contacted in the last 3 days, never one touched in the last 30 minutes (a run may
+ * still be working on it), and only when the client's follow-up allowance is not used up. The unique (lead, touch) index
+ * is the final guard against a duplicate.
+ */
+export async function recoverOrphanedFollowUps(admin: ReturnType<typeof createAdminClient>) {
+  const now = Date.now();
+  const { data: candidates } = await admin
+    .from("leads")
+    .select("id, client_id, follow_up_number, last_contact_at")
+    .gte("follow_up_number", 1)
+    .lte("follow_up_number", 3)
+    .is("next_follow_up_at", null)
+    .eq("reply_received", false)
+    .eq("unsubscribed", false)
+    .eq("email_bounced", false)
+    .eq("booked", false)
+    .eq("complained", false)
+    .eq("manually_stopped", false)
+    .gte("last_contact_at", new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString())
+    .lte("last_contact_at", new Date(now - 30 * 60 * 1000).toISOString())
+    .limit(20)
+    .returns<{ id: string; client_id: string; follow_up_number: number; last_contact_at: string }[]>();
+  for (const l of candidates ?? []) {
+    const { data: lastLog } = await admin
+      .from("outreach_log")
+      .select("sent_at")
+      .eq("lead_id", l.id)
+      .order("sent_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<{ sent_at: string }>();
+    if (lastLog && now - Date.parse(lastLog.sent_at) < 30 * 60 * 1000) continue;
+    const { data: job } = await admin
+      .from("lead_gen_jobs")
+      .select("criteria")
+      .eq("client_id", l.client_id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<{ criteria: Record<string, unknown> }>();
+    const max = Math.min(maxFollowUpsFor(job?.criteria?.follow_ups as string | undefined), HARD_MAX_FOLLOW_UPS);
+    if (planFollowUp(l.follow_up_number, max).capped) continue;
+    // Due when the normal interval after the last contact has passed.
+    const due = Date.parse(l.last_contact_at) + resolveFollowUpIntervalMs(job?.criteria);
+    await admin.from("leads").update({ next_follow_up_at: new Date(Math.max(due, now)).toISOString() }).eq("id", l.id).is("next_follow_up_at", null);
+  }
+}

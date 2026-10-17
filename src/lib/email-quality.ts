@@ -137,7 +137,46 @@ export function subjectMatchesBody(subject: string, body: string): boolean {
 }
 
 /** Empty list = safe to send. */
-export function lintOutreachEmail(d: Draft, opts: { firstTouch?: boolean; earlierBodies?: string[] } = { firstTouch: true }): string[] {
+/**
+ * Industry families used to stop an email being about the wrong trade (e.g. a food email to a realtor).
+ * Matching is by whole words / phrases; a lead's industry maps to the families whose terms it contains.
+ */
+const INDUSTRY_FAMILIES: Record<string, string[]> = {
+  real_estate: ["real estate", "realtor", "realtors", "realty", "property", "properties", "listing", "listings", "broker", "brokerage", "mortgage", "landlord", "tenants"],
+  food: ["restaurant", "restaurants", "cafe", "cafes", "catering", "menu", "menus", "chef", "bakery", "diner", "takeaway", "food business", "food service", "diners"],
+  dental_health: ["dentist", "dentists", "dental", "clinic", "clinics", "patients", "patient", "physician", "medical practice", "chiropractor"],
+  legal: ["law firm", "law firms", "lawyer", "lawyers", "attorney", "attorneys", "legal practice"],
+  fitness_beauty: ["gym", "gyms", "fitness", "salon", "salons", "spa", "barber", "yoga", "personal trainer"],
+  automotive: ["dealership", "dealerships", "car dealer", "auto repair", "mechanic", "garage"],
+  construction: ["contractor", "contractors", "construction", "roofing", "plumber", "plumbing", "electrician", "builders"],
+  education: ["school", "schools", "tutoring", "academy", "students", "university"],
+  retail_ecom: ["retail", "retailer", "e-commerce", "ecommerce", "online store", "boutique"],
+};
+
+function termRegex(t: string) { return new RegExp(`(^|[^a-z])${t.replace(/[$.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z]|$)`, "i"); }
+
+/** Families a free-text industry belongs to (e.g. "real estate agent" -> real_estate). */
+export function industryFamilies(industry: string | null | undefined): string[] {
+  const t = (industry ?? "").toLowerCase();
+  if (!t.trim()) return [];
+  const hits = Object.entries(INDUSTRY_FAMILIES).filter(([, terms]) => terms.some((w) => termRegex(w).test(t)));
+  return hits.map(([k]) => k);
+}
+
+/** Issues when the email talks about a DIFFERENT industry family than the lead's own. */
+export function industryMismatch(text: string, industry: string | null | undefined): string[] {
+  const own = industryFamilies(industry);
+  if (!own.length) return [];
+  const bad: string[] = [];
+  for (const [family, terms] of Object.entries(INDUSTRY_FAMILIES)) {
+    if (own.includes(family)) continue;
+    const hit = terms.find((w) => termRegex(w).test(text));
+    if (hit) bad.push(`mentions "${hit}" (${family}) but the lead is in ${industry}`);
+  }
+  return bad;
+}
+
+export function lintOutreachEmail(d: Draft, opts: { firstTouch?: boolean; earlierBodies?: string[]; industry?: string | null } = { firstTouch: true }): string[] {
   const issues: string[] = [];
   const subject = d.subject.trim();
   const body = d.body.trim();
@@ -148,6 +187,10 @@ export function lintOutreachEmail(d: Draft, opts: { firstTouch?: boolean; earlie
   if (/[!?]{2,}/.test(subject) || subject.includes("!")) issues.push("subject contains exclamation marks");
   if (/^(re|fwd?|fw)\s*:/i.test(subject)) issues.push("subject fakes a reply/forward");
   if (/\p{Extended_Pictographic}/u.test(text)) issues.push("contains emoji");
+
+  for (const m of industryMismatch(`${subject}\n${body}`, opts.industry)) issues.push(`wrong industry: ${m}`);
+  // AIDA: every email must end with an Action - one short question the reader can answer.
+  if (!body.includes("?")) issues.push("no call to action (AIDA needs a closing question)");
 
   const wc = wordCount(body);
   if (wc < 25) issues.push("body too short to be a real email");

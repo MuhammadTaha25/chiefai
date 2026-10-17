@@ -234,6 +234,7 @@ export async function POST(req: NextRequest) {
           status: "new",
           lead_source: FORM_LEAD_SOURCE,
           lead_type: "outbound",
+          industry: p.industry ?? null,
         })
         .select()
         .single();

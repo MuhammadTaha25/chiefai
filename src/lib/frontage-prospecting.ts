@@ -55,6 +55,12 @@ interface FrontageRow {
 }
 
 const PAGE_SIZE = 100;
+
+/** "real_estate_agent" -> "real estate agent"; null when there is nothing usable. */
+export function humanizeIndustry(raw: string | null | undefined): string | null {
+  const t = (raw ?? "").replace(/[_\-]+/g, " ").replace(/\s+/g, " ").trim().toLowerCase().slice(0, 60);
+  return t || null;
+}
 const MAX_PAGES = 3;
 
 /** Form values arrive as arrays or as "a, b" strings. */
@@ -290,7 +296,7 @@ export async function runPlans(
           if (!email || seen.has(email)) continue;
           seen.add(email);
           const name = (r.name ?? "").trim();
-          out.push({ name, email, company: name, jobTitle: null });
+          out.push({ name, email, company: name, jobTitle: null, industry: humanizeIndustry(r.category) ?? humanizeIndustry((filter as { category?: string; search?: string }).category ?? (filter as { search?: string }).search) });
           if (out.length >= limit) break outer;
         }
         if (rows.length < pageSize) {

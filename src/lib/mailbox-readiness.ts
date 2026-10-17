@@ -82,7 +82,7 @@ export { WARMUP_CAP, coldLimitForAge, effectiveDailyLimit, describeMailboxLimit 
 
 export type MailboxReservation =
   | { ok: true; mailbox: { id: string; address: string }; reservationId: string }
-  | { ok: false; reason: "no_mailbox" | "at_capacity" | "all_unhealthy" };
+  | { ok: false; reason: "no_mailbox" | "at_capacity" | "all_unhealthy" | "duplicate_touch" };
 
 /**
  * Sales sends today for one mailbox. touch_number 0 (auto-replies to prospects) is excluded: replies are
@@ -228,6 +228,23 @@ export async function reserveMailboxSlot(
       })
       .select("id")
       .single<{ id: string }>();
+    if (error && (error as { code?: string }).code === "23505") {
+      // This lead already has a row for this touch (unique index lead_id + touch_number). A real send means a duplicate
+      // attempt: refuse it. A stale "pending:" row from a crashed run is cleared once so the touch is not blocked forever.
+      const { data: existing } = await admin
+        .from("outreach_log")
+        .select("id, provider_message_id, sent_at")
+        .eq("lead_id", leadId)
+        .eq("touch_number", row.touch_number)
+        .limit(1)
+        .maybeSingle<{ id: string; provider_message_id: string | null; sent_at: string }>();
+      const stalePending = existing && String(existing.provider_message_id ?? "").startsWith("pending:") && Date.now() - Date.parse(existing.sent_at) > 15 * 60_000;
+      if (stalePending && attempt < 3) {
+        await admin.from("outreach_log").delete().eq("id", existing!.id);
+        continue;
+      }
+      return { ok: false, reason: "duplicate_touch" };
+    }
     if (error || !reserved) break;
 
     if ((await salesSendsToday(admin, m.id, dayStart)) > limit) {

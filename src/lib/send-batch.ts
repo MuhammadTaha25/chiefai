@@ -186,7 +186,7 @@ export async function sendBatchForClient(clientId: string) {
   const since = autoSendSince();
   let eligibleQuery = admin
     .from("leads")
-    .select("id, name, company, job_title, email, city, country")
+    .select("id, name, company, job_title, email, city, country, industry")
     .eq("campaign_id", campaign.id)
     .eq("lead_source", FORM_LEAD_SOURCE)
     .eq("status", "new")
@@ -241,7 +241,7 @@ export async function sendBatchForClient(clientId: string) {
     // The block's mailbox is the only one allowed here; daily-limit enforcement stays in reserveMailboxSlot (atomic).
     const reservation = await reserveMailboxSlot(admin, clientId, lead.id, { touch_number: 1, campaign_id: campaign.id }, { mailboxId: activeMailbox.id, timeZone: sendTz });
     if (!reservation.ok) {
-      sent.push({ leadId: lead.id, mailbox: "-", result: "failed", error: reservation.reason === "at_capacity" ? "mailbox daily limit reached" : reservation.reason === "all_unhealthy" ? "all mailboxes paused: high bounce/complaint rate" : "no ready mailbox" });
+      sent.push({ leadId: lead.id, mailbox: "-", result: "failed", error: reservation.reason === "duplicate_touch" ? "this lead already has its first email" : reservation.reason === "at_capacity" ? "mailbox daily limit reached" : reservation.reason === "all_unhealthy" ? "all mailboxes paused: high bounce/complaint rate" : "no ready mailbox" });
       break;
     }
     const mailbox = reservation.mailbox;
@@ -269,10 +269,15 @@ export async function sendBatchForClient(clientId: string) {
       continue;
     }
 
+    // Set the moment Mailgun accepts the email. After that the email IS sent, so no later error may release the slot
+    // or put the lead back to "new" (that would email the same person again on the next run).
+    let mailSent = false;
     try {
       // Directory leads are businesses, not people: their "name" is the company name, so greet generically.
       const isBusinessLead = !lead.job_title || (lead.name ?? "").trim().toLowerCase() === (lead.company ?? "").trim().toLowerCase();
       const senderCompany = clientRow?.company_name ?? "us";
+      // The lead's OWN industry wins; the campaign's single target industry is only a fallback; otherwise none is claimed.
+      const leadIndustry = (lead as { industry?: string | null }).industry?.trim() || industry;
 
       // Try AIDA AI draft first; fall back to fixed template if it fails or fails the lint.
       // This gives each lead a personalised email while keeping deliverability as the hard backstop.
@@ -280,7 +285,7 @@ export async function sendBatchForClient(clientId: string) {
         buildTemplateEmail({
           firstName: isBusinessLead ? null : lead.name,
           leadCompany: lead.company || "your company",
-          industry,
+          industry: leadIndustry,
           jobTitle: isBusinessLead ? null : lead.job_title ?? null,
           offer: phrases.offer,
           benefit: phrases.benefit,
@@ -310,11 +315,12 @@ export async function sendBatchForClient(clientId: string) {
             leadTitle: isBusinessLead ? null : (lead.job_title ?? null),
             leadCity: lead.city ?? null,
             leadCountry: lead.country ?? null,
+            leadIndustry,
             businessContext: enrichedContext,
           })
         );
         // Only use the AIDA draft if it passes all deliverability checks; otherwise keep the fixed template.
-        if (lintOutreachEmail(aidaDraft).length === 0) draft = aidaDraft;
+        if (lintOutreachEmail(aidaDraft, { firstTouch: true, industry: leadIndustry }).length === 0) draft = aidaDraft;
       } catch {
         // AIDA generation failed (rate-limit, timeout, etc.) — fixed template is already set.
       }
@@ -323,15 +329,15 @@ export async function sendBatchForClient(clientId: string) {
           renderCustomTemplate(resolvedTemplateSubject, resolvedTemplateBody, {
             first_name: isBusinessLead ? null : lead.name,
             company: lead.company,
-            industry,
+            industry: leadIndustry,
             job_title: isBusinessLead ? null : lead.job_title ?? null,
             sender_company: senderCompany,
             website: bareDomain(context.website),
           })
         );
-        if (lintOutreachEmail(custom).length === 0) draft = custom;
+        if (lintOutreachEmail(custom, { firstTouch: true, industry: leadIndustry }).length === 0) draft = custom;
       }
-      const issues = lintOutreachEmail(draft);
+      const issues = lintOutreachEmail(draft, { firstTouch: true, industry: leadIndustry });
       if (issues.length) throw new Error(`Draft failed deliverability checks: ${issues.join("; ")}`);
 
       const sentMsg = await sendMail({
@@ -344,6 +350,7 @@ export async function sendBatchForClient(clientId: string) {
         headers: unsubscribeHeaders(mailbox.address),
       });
 
+      mailSent = true;
       await Promise.all([
         finalizeReservation(admin, reservation.reservationId, { messageId: sentMsg.id, subject: draft.subject, body: draft.body }),
         admin
@@ -359,6 +366,19 @@ export async function sendBatchForClient(clientId: string) {
 
       sent.push({ leadId: lead.id, mailbox: mailbox.address, result: "sent" });
     } catch (err) {
+      if (mailSent) {
+        // The email already went out: record that as best we can, never undo it.
+        try {
+          await admin.from("leads").update({
+            status: "email_sent",
+            follow_up_number: 1,
+            last_contact_at: new Date().toISOString(),
+            next_follow_up_at: new Date(Date.now() + resolveFirstFollowUpDelayMs(job?.criteria)).toISOString(),
+          }).eq("id", lead.id);
+        } catch { /* a later reconciliation sees the sent log row */ }
+        sent.push({ leadId: lead.id, mailbox: mailbox.address, result: "sent", error: `email sent, but saving afterwards failed: ${(err as Error).message}` });
+        continue;
+      }
       await releaseReservation(admin, reservation.reservationId);
       await admin.from("leads").update({ last_contact_at: null }).eq("id", lead.id).eq("status", "new");
       // One lead failing (bad address, Mailgun hiccup) doesn't stop the rest

@@ -23,6 +23,8 @@ export interface ProspectResult {
   email: string | null;
   company: string;
   jobTitle: string | null;
+  /** The lead's own industry/category as reported by the source; null/undefined when unknown. */
+  industry?: string | null;
 }
 
 export interface ProspectQuery {
