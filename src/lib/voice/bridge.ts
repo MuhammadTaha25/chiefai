@@ -1,4 +1,6 @@
 import http from "node:http";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
 import { MulawToPcm16k, Pcm24kToMulaw } from "./audio.ts";
 
@@ -63,6 +65,22 @@ const TOOLS = [
   },
 ];
 
+/**
+ * Pre-recorded hello (same Gemini voice), played the moment the owner answers so the pause while the live
+ * session starts is not silent. Made once by `npm run voice:greeting`. Optional: no file, no greeting.
+ */
+export const greetingPath = () => process.env.VOICE_GREETING_FILE || path.join(process.cwd(), "assets", "voice-greeting.mulaw");
+export function loadGreeting(file = greetingPath()): Buffer | null {
+  try { return existsSync(file) ? readFileSync(file) : null; } catch { return null; }
+}
+/** Twilio media frames: 20 ms of 8 kHz mu-law = 160 bytes. */
+export function frames(mulaw: Buffer, size = 160): Buffer[] {
+  const out: Buffer[] = [];
+  for (let i = 0; i < mulaw.length; i += size) out.push(mulaw.subarray(i, Math.min(i + size, mulaw.length)));
+  return out;
+}
+const GREETING = loadGreeting();
+
 interface Twilio {
   event: string;
   start?: { streamSid: string; callSid: string; customParameters?: Record<string, string> };
@@ -124,6 +142,12 @@ function handleCall(twilio: WebSocket): void {
 
   async function begin(params: Record<string, string>) {
     mark("stream started");
+    let greeted = false;
+    if (GREETING && params.reason === "daily_report") {
+      for (const f of frames(GREETING)) sendToTwilio({ event: "media", media: { payload: f.toString("base64") } });
+      greeted = true;
+      mark("greeting sent");
+    }
     clientId = params.client_id ?? "";
     const reason = params.reason ?? "inbound";
     direction = reason === "daily_report" ? "outbound" : "inbound";
@@ -165,7 +189,8 @@ function handleCall(twilio: WebSocket): void {
         ready = true;
         for (const b of pending.splice(0)) sendGemini({ realtimeInput: { audio: { data: b.toString("base64"), mimeType: "audio/pcm;rate=16000" } } });
         // The agent speaks first (daily brief, or a greeting on an inbound call).
-        sendGemini({ clientContent: { turns: [{ role: "user", parts: [{ text: String(session.opening) }] }], turnComplete: true } });
+        const opening = String(session.opening) + (greeted ? " A short hello has ALREADY been played to the owner, so do not say hello again: go straight into the brief, starting with the time-of-day greeting only if it fits in a few words." : "");
+        sendGemini({ clientContent: { turns: [{ role: "user", parts: [{ text: opening }] }], turnComplete: true } });
         return;
       }
 
