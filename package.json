@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-test-module-mocks --import ./scripts/register-alias.mjs tests/*.test.ts",
+    "voice:bridge": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/register-alias.mjs scripts/voice-bridge.ts",
     "qa:social": "node --import ./scripts/register-alias.mjs scripts/qa-social-local.ts",
     "tunnel": "ngrok http 3000 --url=whiny-shawn-amphitheatrically.ngrok-free.dev"
   },

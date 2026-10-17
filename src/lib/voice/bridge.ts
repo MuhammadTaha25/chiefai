@@ -1,6 +1,6 @@
 import http from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
-import { MulawToPcm16k, Pcm24kToMulaw } from "./audio";
+import { MulawToPcm16k, Pcm24kToMulaw } from "./audio.ts";
 
 /**
  * Live voice bridge: Twilio Media Stream  <->  Gemini 2.5 native audio (Live API).
@@ -237,6 +237,6 @@ export function startVoiceBridge(): boolean {
   const wss = new WebSocketServer({ server, path: "/stream" });
   wss.on("connection", handleCall);
   server.on("error", (e) => console.warn(`[voice] bridge could not listen: ${e.message}`));
-  server.listen(bridgePort(), "127.0.0.1", () => console.log(`[voice] Gemini live bridge on :${bridgePort()} (${liveModel()})`));
+  server.listen(bridgePort(), process.env.VOICE_BRIDGE_HOST || "127.0.0.1", () => console.log(`[voice] Gemini live bridge on :${bridgePort()} (${liveModel()})`));
   return true;
 }
