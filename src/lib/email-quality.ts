@@ -83,6 +83,28 @@ export function cleanOutreachEmail(d: Draft): Draft {
   return { subject, body };
 }
 
+const SIGNOFF_WORD = /^(best|best regards|kind regards|regards|warm regards|thanks|thank you|many thanks|cheers|sincerely|talk soon|all the best)[,.!]?$/i;
+const GREETING_LINE = /^(hi|hello|hey|dear|good (morning|afternoon|evening))\b[^\n]{0,60}$/i;
+
+/**
+ * Greeting and sign-off are added by the system, never trusted to the model, so every email of a client carries that
+ * client's own sender name and addresses the right lead. Any greeting / sign-off the model wrote anyway is removed first.
+ * `greetingName` is the lead's first name, or null for a business lead ("Hi there,").
+ */
+export function applyGreetingAndSignoff(d: Draft, opts: { greetingName: string | null; senderName: string }): Draft {
+  let paras = d.body.replace(/\r/g, "").trim().split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  // Leading greeting paragraph ("Hi Sam,") written by the model.
+  if (paras.length > 1 && !/\n/.test(paras[0]) && GREETING_LINE.test(paras[0]) && /[,:]?$/.test(paras[0]) && !/[.?!]$/.test(paras[0])) paras.shift();
+  // Trailing sign-off ("Best,\nTest Co" or a lone name/company line).
+  const last = paras[paras.length - 1] ?? "";
+  const lastLines = last.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (paras.length > 1 && lastLines.length && SIGNOFF_WORD.test(lastLines[0])) paras.pop();
+  else if (paras.length > 1 && lastLines.length <= 3 && last.split(/\s+/).length <= 6 && !/[.?!]/.test(last)) paras.pop();
+  const name = (opts.greetingName ?? "").trim().split(/\s+/)[0];
+  const sender = opts.senderName.replace(/["<>\r\n]/g, "").trim() || "Team";
+  return { subject: d.subject, body: [`Hi ${name || "there"},`, ...paras, `Best,\n${sender}`].join("\n\n") };
+}
+
 /** Weighted spam score of a draft (subject counts double for the signals that matter most there). */
 export function spamScore(d: Draft): { total: number; hits: string[] } {
   const subject = d.subject.trim();

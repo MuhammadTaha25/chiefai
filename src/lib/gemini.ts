@@ -207,7 +207,7 @@ Voice & style:
 - Subject line: conversational and specific, like something a colleague would write (e.g. "quick question about [their business]" or "idea for [their company]") — lowercase preferred, 4–7 words (roughly 30–50 characters)
 - 55–80 words total for the body (shorter first emails get more replies). One short paragraph or two very short ones.
 - Plain text only. No bullet points, no bold, no links, no attachments.
-- Sign off casually: just the sender's first name or company name — no titles, no phone numbers
+- Do NOT write a greeting line or a sign-off: the system adds "Hi <name>," and the sender's sign-off itself. Write only the message body.
 - Never use: free, guarantee, act now, limited time, click here, buy now, 100%, risk-free, urgent, double your, cash, winner, "I wanted to reach out", "touch base", "circle back", "synergy"
 - Do not make up facts, statistics, or claim results you don't know
 
@@ -454,6 +454,7 @@ Hard rules:
 - Subject line: any short placeholder — the system replaces it with the original thread's subject.
 - Do not invent facts, stats, testimonials or results not in the business context. Never write a number of hours, a percentage, or phrases like "clients report" / "customers say".
 - ${params.leadIndustry ? `The recipient works in ${untrusted(params.leadIndustry, 100)}: keep every line relevant to that industry and never mention or imply a different one.` : "The recipient's industry is unknown: do not guess or name an industry."}
+- Do NOT write a greeting line or a sign-off: the system adds them. Write only the message body.
 - Keep a mini AIDA flow in 30-50 words: a fresh attention line, one benefit or problem, one soft question.
 
 ${SPAM_SAFE_RULES}
