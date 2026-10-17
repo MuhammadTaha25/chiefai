@@ -117,15 +117,23 @@ function handleCall(twilio: WebSocket): void {
     if (gemini?.readyState === WebSocket.OPEN) gemini.send(JSON.stringify(msg));
   };
 
+  // Timing (ms since the stream opened) so a slow start can be pinned on the right step.
+  const t0 = Date.now();
+  let firstAudioLogged = false;
+  const mark = (what: string) => console.log(`[voice] +${Date.now() - t0}ms ${what}`);
+
   async function begin(params: Record<string, string>) {
+    mark("stream started");
     clientId = params.client_id ?? "";
     const reason = params.reason ?? "inbound";
     direction = reason === "daily_report" ? "outbound" : "inbound";
     const session = await appCall({ action: "start", client_id: clientId, reason, exp: Number(params.exp), token: params.token });
+    mark("app returned session");
 
     pinRequired = session.pinRequired === true;
     gemini = new WebSocket(GEMINI_WS, { headers: { "x-goog-api-key": process.env.GEMINI_API_KEY! } });
     gemini.on("open", () => {
+      mark("gemini socket open");
       sendGemini({
         setup: {
           model: `models/${liveModel()}`,
@@ -148,6 +156,7 @@ function handleCall(twilio: WebSocket): void {
       try { m = JSON.parse(raw.toString()); } catch { return; }
 
       if (m.setupComplete) {
+        mark("gemini setup complete, sending opening");
         ready = true;
         for (const b of pending.splice(0)) sendGemini({ realtimeInput: { audio: { data: b.toString("base64"), mimeType: "audio/pcm;rate=16000" } } });
         // The agent speaks first (daily brief, or a greeting on an inbound call).
@@ -159,6 +168,7 @@ function handleCall(twilio: WebSocket): void {
       if (sc) {
         for (const p of sc.modelTurn?.parts ?? []) {
           if (p.inlineData?.data) {
+            if (!firstAudioLogged) { firstAudioLogged = true; mark("FIRST AUDIO from gemini"); }
             const mulaw = down.convert(Buffer.from(p.inlineData.data, "base64"));
             if (mulaw.length) sendToTwilio({ event: "media", media: { payload: mulaw.toString("base64") } });
           }
