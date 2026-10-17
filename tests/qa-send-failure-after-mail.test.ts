@@ -10,7 +10,7 @@ after(() => S.stopClock());
 beforeEach(() => { S.resetWorld(); S.setClock(S.T0); });
 const id = (r: { id?: unknown }) => r.id as string;
 
-test("D-1: exception after sendMail must not leave the lead new (would be emailed again next run)", { todo: "known defect D-1, remove todo when fixed" }, async () => {
+test("D-1: exception after sendMail must not leave the lead new (would be emailed again next run)", async () => {
   const client = S.seedClient(); const cid = id(client);
   S.seedJob(cid, { follow_up_delay_days: 3 });
   const camp = S.seedCampaign(cid);

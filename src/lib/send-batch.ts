@@ -241,7 +241,7 @@ export async function sendBatchForClient(clientId: string) {
     // The block's mailbox is the only one allowed here; daily-limit enforcement stays in reserveMailboxSlot (atomic).
     const reservation = await reserveMailboxSlot(admin, clientId, lead.id, { touch_number: 1, campaign_id: campaign.id }, { mailboxId: activeMailbox.id, timeZone: sendTz });
     if (!reservation.ok) {
-      sent.push({ leadId: lead.id, mailbox: "-", result: "failed", error: reservation.reason === "at_capacity" ? "mailbox daily limit reached" : reservation.reason === "all_unhealthy" ? "all mailboxes paused: high bounce/complaint rate" : "no ready mailbox" });
+      sent.push({ leadId: lead.id, mailbox: "-", result: "failed", error: reservation.reason === "duplicate_touch" ? "this lead already has its first email" : reservation.reason === "at_capacity" ? "mailbox daily limit reached" : reservation.reason === "all_unhealthy" ? "all mailboxes paused: high bounce/complaint rate" : "no ready mailbox" });
       break;
     }
     const mailbox = reservation.mailbox;
@@ -269,6 +269,9 @@ export async function sendBatchForClient(clientId: string) {
       continue;
     }
 
+    // Set the moment Mailgun accepts the email. After that the email IS sent, so no later error may release the slot
+    // or put the lead back to "new" (that would email the same person again on the next run).
+    let mailSent = false;
     try {
       // Directory leads are businesses, not people: their "name" is the company name, so greet generically.
       const isBusinessLead = !lead.job_title || (lead.name ?? "").trim().toLowerCase() === (lead.company ?? "").trim().toLowerCase();
@@ -347,6 +350,7 @@ export async function sendBatchForClient(clientId: string) {
         headers: unsubscribeHeaders(mailbox.address),
       });
 
+      mailSent = true;
       await Promise.all([
         finalizeReservation(admin, reservation.reservationId, { messageId: sentMsg.id, subject: draft.subject, body: draft.body }),
         admin
@@ -362,6 +366,19 @@ export async function sendBatchForClient(clientId: string) {
 
       sent.push({ leadId: lead.id, mailbox: mailbox.address, result: "sent" });
     } catch (err) {
+      if (mailSent) {
+        // The email already went out: record that as best we can, never undo it.
+        try {
+          await admin.from("leads").update({
+            status: "email_sent",
+            follow_up_number: 1,
+            last_contact_at: new Date().toISOString(),
+            next_follow_up_at: new Date(Date.now() + resolveFirstFollowUpDelayMs(job?.criteria)).toISOString(),
+          }).eq("id", lead.id);
+        } catch { /* a later reconciliation sees the sent log row */ }
+        sent.push({ leadId: lead.id, mailbox: mailbox.address, result: "sent", error: `email sent, but saving afterwards failed: ${(err as Error).message}` });
+        continue;
+      }
       await releaseReservation(admin, reservation.reservationId);
       await admin.from("leads").update({ last_contact_at: null }).eq("id", lead.id).eq("status", "new");
       // One lead failing (bad address, Mailgun hiccup) doesn't stop the rest

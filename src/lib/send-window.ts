@@ -185,6 +185,13 @@ export function buildDynamicPlan(input: DynamicPlanInput): DynamicPlan {
 }
 
 /** Default outreach window when a client has not chosen one: 08:00 to 24:00 local time (the whole day). */
+/** True when `nowMinute` (minutes since local midnight) is inside the window; windows may cross midnight. */
+export function withinSendWindow(window: SendWindow, nowMinute: number): boolean {
+  const length = window.endMin - window.startMin;
+  const rel = (((nowMinute - window.startMin) % 1440) + 1440) % 1440;
+  return rel < length;
+}
+
 export const DEFAULT_SEND_WINDOW: SendWindow = { startMin: 8 * 60, endMin: 24 * 60 };
 
 /** Mailbox blocks are separated by this much break by default (the agreed 1 hour). */
