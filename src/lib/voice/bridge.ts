@@ -243,7 +243,7 @@ function handleCall(twilio: WebSocket): void {
       ready = true;
       for (const b of pending.splice(0)) sendGemini({ realtimeInput: { audio: { data: b.toString("base64"), mimeType: "audio/pcm;rate=16000" } } });
       // The agent speaks first (daily brief, or a greeting on an inbound call).
-      const opening = String(session.opening) + (greeted ? " A short hello has ALREADY been played to the owner, so do not say hello again: go straight into the brief, starting with the time-of-day greeting only if it fits in a few words." : "");
+      const opening = String(session.opening) + (greeted ? " A short hello has ALREADY been played to the owner, so do NOT say hello, hi, good morning/afternoon/evening or any greeting at all: start directly with the first number, for example \"So, no emails went out today...\"." : "");
       sendGemini({ clientContent: { turns: [{ role: "user", parts: [{ text: opening }] }], turnComplete: true } });
     };
 
