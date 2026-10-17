@@ -5,6 +5,7 @@ import { selectVoiceProvider, voiceReadiness } from "@/lib/voice/select";
 import { getCallSettings, setCallSettings, localHourIn } from "@/lib/voice/call-settings";
 import { logEvent } from "@/lib/log-event";
 import { getCompanyFactsCached } from "@/lib/company-facts";
+import { requestBridgePrepare } from "@/lib/voice/prepare";
 
 /**
  * The daily report call.
@@ -112,6 +113,9 @@ async function run(req: NextRequest) {
     // Warm the report while the phone rings (best effort; never blocks or fails the call).
     void getCompanyFactsCached(admin, row.client_id, tz).catch(() => undefined);
 
+    // Pre-warm the voice bridge while the phone rings, so it can speak the moment the owner answers.
+    const prepared = requestBridgePrepare(row.client_id);
+
     try {
       const { callSid } = await provider.placeCall({
         from: row.twilio_number,
@@ -119,7 +123,9 @@ async function run(req: NextRequest) {
         metadata: { client_id: row.client_id, reason: "daily_report", slot: date },
       });
 
-      // Claim the slot only after the provider accepted the call, so a failure
+      void (await prepared);
+
+            // Claim the slot only after the provider accepted the call, so a failure
       // does not burn the day.
       await setCallSettings(admin, row.client_id, {
         daily_call_last_slot: date,
