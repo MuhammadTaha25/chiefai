@@ -67,7 +67,7 @@ test("the same moment gives the same answer: waiting does not re-roll the dice",
   for (let m = 1; m <= 12 && openedAt < 0; m++) {
     S.setClock(S.T0 + m * S.MIN);
     await app.followUps.runFollowUpBatch({ clientIdFilter: cid, isCron: true });
-    if (S.mailer.sent.length === 2) openedAt = m;
+    if ((S.mailer.sent.length as number) === 2) openedAt = m;
   }
   assert.ok(openedAt >= 3 && openedAt <= 10, `opened after ${openedAt} min`);
 });
