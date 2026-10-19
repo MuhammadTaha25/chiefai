@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyMailgunSignature } from "@/lib/webhook-security";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logEvent } from "@/lib/log-event";
+import { buildBounceDetail } from "@/lib/bounce-detail";
 
 /**
  * Mailgun's own tracking-event webhook (complaint/unsubscribe — spec PHASE
@@ -96,6 +97,17 @@ export async function POST(req: NextRequest) {
       })
       .eq("id", lead.id)
       .eq("client_id", lead.client_id);
+    // Record-only: keep the receiver's own failure message. A separate best-effort update, so a missing column
+    // or any error here can never stop the bounce flag above from being saved.
+    try {
+      await admin
+        .from("leads")
+        .update({ bounce_detail: buildBounceDetail(eventData) })
+        .eq("id", lead.id)
+        .eq("client_id", lead.client_id);
+    } catch {
+      /* ignore */
+    }
   } else if (eventType === "complained") {
     await admin
       .from("leads")
