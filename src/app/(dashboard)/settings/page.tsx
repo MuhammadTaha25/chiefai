@@ -17,6 +17,8 @@ interface Domain {
   id: string;
   domain: string;
   dns_status: string | null;
+  dns_health?: { checks: { kind: string; name: string; status: string; expected?: string }[] } | null;
+  dns_checked_at?: string | null;
 }
 interface Mailbox {
   id: string;
@@ -231,7 +233,20 @@ export default async function SettingsPage(props: {
         <div className="mt-3 space-y-2">
           {(domains ?? []).map((d) => (
             <div key={d.id} className="flex items-center justify-between rounded-md border border-black/[.08] px-4 py-3 text-sm dark:border-white/[.145]">
-              <span>{d.domain}</span>
+              <div>
+                <span>{d.domain}</span>
+                {d.dns_health && (
+                  <ul className="mt-1 space-y-0.5 text-xs text-zinc-500">
+                    {d.dns_health.checks.map((c) => (
+                      <li key={`${c.kind}-${c.name}`}>
+                        {c.status === "ok" ? "✅" : "❌"} {c.kind.toUpperCase()}
+                        {c.status !== "ok" && ` — ${c.status === "missing" ? "not found" : c.status === "duplicate_spf" ? "two SPF records (keep one)" : "wrong value"}`}
+                        {c.status !== "ok" && c.expected ? ` (expected: ${c.expected})` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
               <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs dark:bg-zinc-800">{d.dns_status || "pending"}</span>
             </div>
           ))}
