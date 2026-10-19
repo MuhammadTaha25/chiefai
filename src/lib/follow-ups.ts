@@ -8,7 +8,7 @@ import { applyGreetingAndSignoff, cleanOutreachEmail, lintOutreachEmail } from "
 import { autoSendSince } from "@/lib/campaign";
 import { resolveFollowUpIntervalMs, planFollowUp } from "@/lib/follow-up-config";
 import { resolveSendWindow, withinSendWindow } from "@/lib/send-window";
-import { followUpGapMs } from "@/lib/send-jitter";
+import { followUpGapMs, stillWaiting } from "@/lib/send-jitter";
 import { isValidTimeZone, localClock } from "@/lib/social-schedule";
 import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
 
@@ -97,6 +97,8 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
       .eq("manually_stopped", false)
       .not("email", "is", null)
       .lte("next_follow_up_at", new Date().toISOString())
+      // A lead whose last email soft-bounced (mailbox full, server busy) waits out its retry time first.
+      .or(`bounce_retry_after.is.null,bounce_retry_after.lte.${new Date().toISOString()}`)
       .order("next_follow_up_at", { ascending: true });
 
     // Follow-ups apply to any lead that received an initial email — both AI-prospected leads and
@@ -137,7 +139,8 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
       .eq("complained", false)
       .eq("manually_stopped", false)
       .not("email", "is", null)
-      .lte("next_follow_up_at", new Date().toISOString());
+      .lte("next_follow_up_at", new Date().toISOString())
+      .or(`bounce_retry_after.is.null,bounce_retry_after.lte.${new Date().toISOString()}`);
 
     if (clientErr) return { ok: false as const, error: clientErr.message, results: [] as FollowUpResult[] };
 
@@ -209,7 +212,7 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
         .order("sent_at", { ascending: false })
         .limit(1)
         .maybeSingle<{ sent_at: string }>();
-      if (lastSend && Date.now() - Date.parse(lastSend.sent_at) < followUpGapMs(lastSend.sent_at)) {
+      if (lastSend && stillWaiting(lastSend.sent_at, followUpGapMs(lastSend.sent_at))) {
         results.push({ leadId: lead.id, result: "skipped", detail: "pacing: waiting a few minutes after this client's last send" });
         continue;
       }

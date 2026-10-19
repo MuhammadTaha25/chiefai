@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import MailboxSentEmailsModal from "@/components/mailbox-sent-emails-modal";
+import { crowdedDomains } from "@/lib/mailbox-crowding";
 
 interface MailboxRow {
   id: string;
@@ -60,12 +61,7 @@ export default function DomainMailboxList({ mailboxes }: { mailboxes: MailboxRow
   }
 
   // Many mailboxes on one domain share one domain reputation, so more of them does not mean more safe volume.
-  const perDomain = new Map<string, number>();
-  for (const m of mailboxes) {
-    const d = m.address.split("@").pop()?.toLowerCase() ?? "";
-    perDomain.set(d, (perDomain.get(d) ?? 0) + 1);
-  }
-  const crowded = [...perDomain.entries()].filter(([, n]) => n > 3);
+  const crowded = crowdedDomains(mailboxes.map((m) => m.address));
 
   return (
     <div>

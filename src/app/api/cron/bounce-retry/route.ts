@@ -8,8 +8,7 @@ export const maxDuration = 30;
  * When Mailgun reports a "temporary" / "failed" event (server error, full mailbox),
  * we set bounce_type = 'temporary' and bounce_retry_after = now() + 24h.
  *
- * This cron runs every few hours and re-enables those leads so the existing
- * follow-up scheduler can send to them again.
+ * Follow-ups skip a lead until its retry time passes; this cron then clears the flag (every 30 minutes).
  *
  * Run as: GET /api/cron/bounce-retry
  *         Authorization: Bearer <CRON_SECRET>
@@ -47,8 +46,8 @@ export async function GET(req: NextRequest) {
         .update({
           bounce_type: null,
           bounce_retry_after: null,
-          // Reset next_follow_up_at so the follow-up scheduler picks this lead up again shortly
-          next_follow_up_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 min from now
+          // next_follow_up_at is left exactly as it was: the follow-up flow holds a soft-bounced lead until its
+          // retry time, then sends when the follow-up is due. Never pulled forward, never resurrected.
         })
         .eq("id", lead.id)
         .eq("bounce_type", "temporary") // atomic: only if still temporary
