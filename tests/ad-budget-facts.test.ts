@@ -9,5 +9,5 @@ test("only launched campaigns count toward the planned daily budget", () => {
 
 test("the live voice prompt forbids naming a currency", () => {
   const src = readFileSync("src/app/api/voice/live/route.ts", "utf8");
-  assert.match(src, /never name a currency/i);
+  assert.match(src, /only name a currency when the data gives one/i);
 });

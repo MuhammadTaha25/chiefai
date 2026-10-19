@@ -423,6 +423,8 @@ export async function POST(
     business_description: cleanValue(brief.offer) || advertisingWhat,
     target_location: targetLocation,
     daily_budget: dailyBudget,
+    // The Meta ad account's own currency (null when the billing check could not run); read back by the voice report.
+    currency: adAccountCurrency,
     landing_page_url: landingPageUrl,
     target_audience: cleanValue(brief.audience_description),
     status: "generating",
