@@ -134,6 +134,7 @@ test("soft bounce: the lead is NOT marked dead; a 24-hour retry time is recorded
 test("soft-bounce retry cron: needs the secret, ignores leads not yet due, clears the flag once due and reschedules", async () => {
   process.env.CRON_SECRET = "s3cret";
   const w = world();
+  const due = S.leadRow(id(w.lead)).next_follow_up_at;
   await mgEvent({ event: "failed", severity: "temporary", messageId: w.messageId, recipient: String(w.lead.email) });
   const call = (auth?: string) => R.bounceRetry.GET(new NextRequest("http://localhost/api/cron/bounce-retry", { headers: auth ? { authorization: auth } : {} }));
   assert.equal((await call()).status, 401);
@@ -145,7 +146,22 @@ test("soft-bounce retry cron: needs the secret, ignores leads not yet due, clear
   const l = S.leadRow(id(w.lead));
   assert.equal(l.bounce_type, null);
   assert.equal(l.bounce_retry_after, null);
-  assert.equal(Math.round((Date.parse(l.next_follow_up_at) - S.now()) / S.MIN), 15);
+  assert.equal(l.next_follow_up_at, due, "the follow-up schedule is not pulled forward");
+});
+
+test("soft bounce: follow-ups wait out the 24-hour retry window, then go out; a held lead does not block the client's other leads", async () => {
+  process.env.CRON_SECRET = "s3cret";
+  const w = world();
+  const other = S.seedSentLead(w.cid, id(w.mb));
+  await mgEvent({ event: "failed", severity: "temporary", messageId: w.messageId, recipient: String(w.lead.email) });
+  await runFollowUps(w.cid);
+  assert.equal(S.mailer.sent.length, 1, "only the healthy lead is emailed");
+  assert.equal(S.mailer.sent[0].to, other.email);
+  S.setClock(S.T0 + 25 * S.HOUR);
+  await R.bounceRetry.GET(new NextRequest("http://localhost/x", { headers: { authorization: "Bearer s3cret" } }));
+  S.setClock(S.T0 + 26 * S.HOUR);
+  await runFollowUps(w.cid);
+  assert.ok(S.mailer.sent.some((m) => m.to === w.lead.email), "after the retry window the held lead gets its follow-up");
 });
 
 test("soft-bounce retry cron never revives a hard-bounced lead", async () => {
@@ -172,7 +188,7 @@ test("WIRING: every cron route in the app is listed in CRONS.md (an unscheduled 
   const missing = routes.filter((r) => !r.includes("[") && !doc.includes(r));
   // KNOWN GAPS found by this check (2026-10-19): written but not scheduled anywhere (not in CRONS.md, not in the
   // n8n "ChiefAI Scheduled Jobs" workflow). Remove an entry here once it is scheduled; add nothing new to this list.
-  const KNOWN_UNSCHEDULED = ["/api/cron/bounce-retry", "/api/cron/meeting-feedback"];
+  const KNOWN_UNSCHEDULED: string[] = [];
   assert.deepEqual(missing.sort(), KNOWN_UNSCHEDULED, "a cron route exists that nothing schedules (or a known gap was fixed: shorten the list)");
 });
 

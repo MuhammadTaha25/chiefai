@@ -56,6 +56,22 @@ class Query implements PromiseLike<Result> {
   lte(col: string, v: unknown) { this.filters.push((r) => !isNil(r[col]) && (r[col] as never) <= (v as never)); return this; }
   in(col: string, vals: unknown[]) { this.filters.push((r) => vals.includes(r[col])); return this; }
   ilike(col: string, pat: string) { this.filters.push((r) => typeof r[col] === "string" && new RegExp(likeToRegExp(pat).source, "is").test(r[col])); return this; }
+  /** PostgREST `or`, e.g. "a.is.null,a.lte.2026-01-01": a row passes when ANY clause does. */
+  or(expr: string) {
+    const clauses = expr.split(",").map((c) => { const [col, op, ...rest] = c.split("."); return { col, op, val: rest.join(".") }; });
+    this.filters.push((r) => clauses.some(({ col, op, val }) => {
+      const x = r[col];
+      if (op === "is") return val === "null" ? isNil(x) : String(x) === val;
+      if (isNil(x)) return false;
+      if (op === "eq") return String(x) === val;
+      if (op === "lte") return String(x) <= val;
+      if (op === "lt") return String(x) < val;
+      if (op === "gte") return String(x) >= val;
+      if (op === "gt") return String(x) > val;
+      throw new Error(`FakeDb: unsupported or() operator ${op}`);
+    }));
+    return this;
+  }
   like(col: string, pat: string) { this.filters.push((r) => typeof r[col] === "string" && likeToRegExp(pat).test(r[col])); return this; }
   is(col: string, v: null | boolean) {
     this.filters.push((r) => (v === null ? isNil(r[col]) : r[col] === v));
