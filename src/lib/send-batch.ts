@@ -8,7 +8,7 @@ import { fetchCompanyDescriptionViaMcp } from "@/lib/vibe-prospecting-mcp";
 // No separate API key needed — falls back gracefully to null if not connected or any error.
 import { bareDomain, buildTemplateEmail } from "@/lib/outreach-template";
 import { renderCustomTemplate } from "@/lib/custom-template";
-import { cleanOutreachEmail, lintOutreachEmail } from "@/lib/email-quality";
+import { applyGreetingAndSignoff, cleanOutreachEmail, lintOutreachEmail } from "@/lib/email-quality";
 import { sendMail, mailgunDomainForAddress, getMailboxReadiness } from "@/lib/mailgun";
 import { checkEmailAddress } from "@/lib/email-address-check";
 import { withUnsubscribeFooter, unsubscribeHeaders } from "@/lib/compliance";
@@ -329,7 +329,8 @@ export async function sendBatchForClient(clientId: string) {
           })
         );
         // Only use the AIDA draft if it passes all deliverability checks; otherwise keep the fixed template.
-        if (lintOutreachEmail(aidaDraft, { firstTouch: true, industry: leadIndustry }).length === 0) draft = aidaDraft;
+        const framed = applyGreetingAndSignoff(aidaDraft, { greetingName: isBusinessLead ? null : lead.name, senderName: senderCompany });
+        if (lintOutreachEmail(framed, { firstTouch: true, industry: leadIndustry }).length === 0) draft = framed;
       } catch {
         // AIDA generation failed (rate-limit, timeout, etc.) — fixed template is already set.
       }

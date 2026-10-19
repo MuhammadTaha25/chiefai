@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { sendMail, mailgunDomainForAddress } from "@/lib/mailgun";
 import { withUnsubscribeFooter, unsubscribeHeaders } from "@/lib/compliance";
 import { draftFollowUpEmail } from "@/lib/gemini";
-import { cleanOutreachEmail, lintOutreachEmail } from "@/lib/email-quality";
+import { applyGreetingAndSignoff, cleanOutreachEmail, lintOutreachEmail } from "@/lib/email-quality";
 import { autoSendSince } from "@/lib/campaign";
 import { resolveFollowUpIntervalMs, planFollowUp } from "@/lib/follow-up-config";
 import { resolveSendWindow, withinSendWindow } from "@/lib/send-window";
@@ -358,10 +358,12 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
       };
       // Never send a follow-up that trips the spam checks (e.g. "free"): redraft a few times, then defer the lead.
       const earlierBodies = (priorSends ?? []).map((p) => p.body ?? "").filter(Boolean);
-      let draft = cleanOutreachEmail(await draftFollowUpEmail(draftParams));
+      const frameDraft = (d: { subject: string; body: string }) =>
+        applyGreetingAndSignoff(d, { greetingName: draftParams.leadName === "there" ? null : draftParams.leadName, senderName: draftParams.senderCompany });
+      let draft = frameDraft(cleanOutreachEmail(await draftFollowUpEmail(draftParams)));
       let lintIssues = lintOutreachEmail(draft, { firstTouch: false, earlierBodies, industry: lead.industry });
       for (let attempt = 0; lintIssues.length && attempt < 2; attempt++) {
-        draft = cleanOutreachEmail(await draftFollowUpEmail(draftParams));
+        draft = frameDraft(cleanOutreachEmail(await draftFollowUpEmail(draftParams)));
         lintIssues = lintOutreachEmail(draft, { firstTouch: false, earlierBodies, industry: lead.industry });
       }
       if (lintIssues.length) throw new Error(`Follow-up draft failed spam checks: ${lintIssues.join("; ")}`);
