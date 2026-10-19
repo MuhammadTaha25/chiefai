@@ -28,7 +28,8 @@ export async function runDnsHealth(admin: SupabaseClient, clientId?: string) {
       out.checked++;
       if (health.allOk) out.healthy++;
       if (!health.sendingOk) out.sendingBroken++;
-    } catch {
+    } catch (e) {
+      console.error(`[dns-health] ${row.domain}: ${(e as { code?: string }).code ?? (e as Error).message}`);
       out.errors++; // Mailgun/DNS hiccup: keep the previous stored result rather than overwrite it with a guess
     }
   }
