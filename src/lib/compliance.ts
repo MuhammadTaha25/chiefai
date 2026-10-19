@@ -11,7 +11,8 @@ const UNSUBSCRIBE_PATTERNS = [
   /remove me/i,
   /take me off/i,
   /stop email(?:ing)?/i,
-  /\bstop\b/i,
+  // A bare "stop" is an opt-out, but not "stop by", "stop in", "don't stop" or "never stop" (a friendly or interested reply).
+  /\bstop\b(?!\s+(?:by|in|over|at|off|into|the|worrying)\b)/i,
   /don'?t (?:contact|email) me/i,
   /do not (?:contact|email) me/i,
   /opt(?:\s|-)?out/i,
@@ -21,7 +22,9 @@ const UNSUBSCRIBE_PATTERNS = [
 ];
 
 export function isUnsubscribeRequest(text: string): boolean {
-  return UNSUBSCRIBE_PATTERNS.some((re) => re.test(text));
+  // "don't stop sending me updates" asks for MORE mail: drop the negated "stop" before looking for opt-out words.
+  const t = text.replace(/\b(?:don'?t|do not|not|never|won'?t|cannot|can'?t)\s+stop\b/gi, " ");
+  return UNSUBSCRIBE_PATTERNS.some((re) => re.test(t));
 }
 
 /** Static, non-AI-generated confirmation — a compliance-sensitive message should never depend on an LLM call succeeding or behaving. */

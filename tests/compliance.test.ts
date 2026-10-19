@@ -8,6 +8,18 @@ test("unsubscribe requests are recognised in the ways people actually write them
   }
 });
 
+test("a bare STOP still opts out, in the ways people write it", () => {
+  for (const t of ["STOP", "stop", "Stop.", "Please stop", "STOP\n\nOn Mon, Oct 19 wrote:\n> Not interested?", "Stop. Not interested.", "please stop these emails"]) {
+    assert.equal(isUnsubscribeRequest(t), true, t);
+  }
+});
+
+test("friendly uses of the word stop are not opt-outs", () => {
+  for (const t of ["Can you stop by Friday?", "I'll stop by your office tomorrow", "We should stop in next week", "Don't stop sending me updates", "please do not stop the project", "Let's not stop here, send details"]) {
+    assert.equal(isUnsubscribeRequest(t), false, t);
+  }
+});
+
 test("normal replies are not mistaken for unsubscribe requests", () => {
   for (const t of ["Sounds interesting, can you send details?", "Not right now, maybe next quarter", "Who are you?", "Thanks, we already have a provider"]) {
     assert.equal(isUnsubscribeRequest(t), false, t);
