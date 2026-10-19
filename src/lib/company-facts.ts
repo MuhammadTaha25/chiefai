@@ -37,6 +37,8 @@ export interface CompanyFacts {
     campaigns_by_status: Record<string, number>;
     campaigns_by_platform: Record<string, number>;
     daily_budget_total: number;
+    /** Currency of the launched campaigns' budget when they all share one and it is recorded; otherwise null (never guessed). */
+    daily_budget_currency: string | null;
     planned_monthly_spend: number;
     /** Sum of ad_performance.spend for this client's campaigns. null when nothing has been synced. */
     actual_spend: number | null;
@@ -162,7 +164,7 @@ export async function getCompanyFacts(admin: SupabaseClient, clientId: string, t
   // table is empty would be inventing one.
   const { data: budgetRows } = await admin
     .from("ad_campaigns")
-    .select("id, daily_budget, status")
+    .select("id, daily_budget, status, currency")
     .eq("client_id", clientId)
     .limit(2000);
   // Only campaigns that were actually launched carry a real budget; drafts, pending-approval and failed ones
@@ -171,6 +173,13 @@ export async function getCompanyFacts(admin: SupabaseClient, clientId: string, t
     (s: number, r: { daily_budget: number | null; status: string | null }) => (r.status === "launched" ? s + (Number(r.daily_budget) || 0) : s),
     0
   );
+
+  const launchedCurrencies = new Set(
+    (budgetRows ?? [])
+      .filter((r: { status: string | null }) => r.status === "launched")
+      .map((r: { currency?: string | null }) => r.currency ?? null)
+  );
+  const dailyBudgetCurrency = launchedCurrencies.size === 1 ? [...launchedCurrencies][0] : null;
 
   const campaignIds = (budgetRows ?? []).map((r: { id: string }) => r.id);
   let perfRows: { spend: number | null; impressions: number | null; clicks: number | null; ctr: number | null; leads: number | null; synced_at: string | null }[] = [];
@@ -254,6 +263,7 @@ export async function getCompanyFacts(admin: SupabaseClient, clientId: string, t
       campaigns_by_status: ads,
       campaigns_by_platform: adPlatforms,
       daily_budget_total: dailyBudgetTotal,
+      daily_budget_currency: dailyBudgetCurrency,
       planned_monthly_spend: Math.round(dailyBudgetTotal * 30 * 100) / 100,
       actual_spend: hasPerf ? Math.round(actualSpend * 100) / 100 : null,
       // Revenue over spend. It is the whole company's won revenue, not revenue
