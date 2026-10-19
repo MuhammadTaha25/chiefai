@@ -36,6 +36,9 @@ test("footer: opt-out line, company and postal address; works with and without a
   const bare = withUnsubscribeFooter("Hello.", { company: null });
   assert.ok(bare.includes('Reply "STOP"'));
   assert.ok(!bare.includes("·"));
+  // No postal address: the company name is NOT repeated in the footer (it is already in the signature).
+  const noAddress = withUnsubscribeFooter("Hello.", { company: "Test Co" });
+  assert.equal(noAddress, 'Hello.\n\n--\nNot interested? Reply "STOP" and we will not email you again.');
   assert.ok(isUnsubscribeRequest(full.split("--")[1]), "the footer's own instruction is something the inbound handler understands");
 });
 

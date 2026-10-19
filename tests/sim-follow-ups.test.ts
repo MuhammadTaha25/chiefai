@@ -305,14 +305,25 @@ test("cron mode: each client is capped per run, each lead is served only from it
   const leadsA = Array.from({ length: 7 }, () => S.seedSentLead(A.cid, A.mbId));
   const leadsB = Array.from({ length: 7 }, () => S.seedSentLead(B.cid, B.mbId));
   const r = await app.followUps.runFollowUpBatch({ clientIdFilter: null, isCron: true });
-  assert.equal(r.results.filter((x) => x.result === "sent").length, 10, "5 per client per run so one tenant cannot starve the other");
+  assert.equal(r.results.filter((x) => x.result === "sent").length, 2, "ONE per client per run: spaced out, and one tenant cannot starve the other");
   const owner = new Map<string, string>([...leadsA.map((l) => [l.email as string, A.cid] as const), ...leadsB.map((l) => [l.email as string, B.cid] as const)]);
   const addr = new Map<string, string>([[A.cid, A.mb.address as string], [B.cid, B.mb.address as string]]);
   for (const m of S.mailer.sent) assert.ok(m.from.includes(addr.get(owner.get(m.to)!)!), "sent from the owning client's own mailbox");
   // The rest go out on the next run.
   S.setClock(S.T0 + 5 * S.MIN);
   const r2 = await app.followUps.runFollowUpBatch({ clientIdFilter: null, isCron: true });
-  assert.ok(r2.results.filter((x) => x.result === "sent").length >= 4);
+  assert.equal(r2.results.filter((x) => x.result === "sent").length, 2, "the next run (5 min later) sends one more per client");
+});
+
+test("pacing: a client's follow-ups are never sent back-to-back, even in one manual run", async () => {
+  const w = world({ limit: 100 });
+  [0, 1, 2].forEach(() => S.seedSentLead(w.cid, w.mbId));
+  const r = await run(w.cid);
+  assert.equal(r.results.filter((x) => x.result === "sent").length, 1, "only the first goes; the rest wait");
+  assert.ok(r.results.filter((x) => x.result === "skipped").every((x) => /pacing/.test(x.detail ?? "")));
+  S.setClock(S.now() + 5 * S.MIN);
+  const r2 = await run(w.cid);
+  assert.equal(r2.results.filter((x) => x.result === "sent").length, 1, "5 minutes later the next one goes");
 });
 
 test("a manual run for one client never touches another client's leads", async () => {

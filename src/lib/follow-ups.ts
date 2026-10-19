@@ -53,9 +53,12 @@ interface DueLead {
   industry: string | null;
 }
 
-// Max leads processed per client per cron run — caps one client's share so a
-// backlog of failing leads for one tenant cannot starve other tenants.
-const MAX_LEADS_PER_CLIENT = 5;
+// Max leads processed per client per cron run. ONE follow-up per client per run: the cron ticks every 5 minutes, so a
+// client's follow-ups are spaced at least that far apart instead of leaving back-to-back within seconds (a burst to
+// one domain is a spam signal), and one tenant's failing leads cannot starve others.
+const MAX_LEADS_PER_CLIENT = 1;
+// If anything from this client went out in the last few minutes (a first email or another follow-up), wait for the next run.
+const MIN_GAP_BETWEEN_CLIENT_SENDS_MS = 4 * 60_000;
 
 // Puts a claimed lead back in the queue after a problem. Guarded with `is null` so it can never overwrite a
 // next_follow_up_at that something else has set in the meantime.
@@ -195,6 +198,18 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
     try {
       if (!(await windowOpen(lead.client_id, lead.campaign_id))) {
         results.push({ leadId: lead.id, result: "skipped", detail: "outside the client's send window - waiting for the window to open" });
+        continue;
+      }
+      // Pacing: space a client's sends. Left untouched (still due) so the next run retries.
+      const { data: lastSend } = await admin
+        .from("outreach_log")
+        .select("sent_at")
+        .eq("client_id", lead.client_id)
+        .order("sent_at", { ascending: false })
+        .limit(1)
+        .maybeSingle<{ sent_at: string }>();
+      if (lastSend && Date.now() - Date.parse(lastSend.sent_at) < MIN_GAP_BETWEEN_CLIENT_SENDS_MS) {
+        results.push({ leadId: lead.id, result: "skipped", detail: "pacing: waiting a few minutes after this client's last send" });
         continue;
       }
       // Atomic claim: only proceed if next_follow_up_at is still exactly
