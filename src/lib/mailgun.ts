@@ -29,6 +29,11 @@ export async function sendMail(params: {
     subject: params.subject,
     text: params.text,
     ...(params.html ? { html: params.html } : {}),
+    // Cold outreach: no open pixel and no rewritten links (shared tracking domains are a known spam signal, and
+    // nothing here reads opens/clicks). Set per message so it holds whatever the Mailgun domain default is.
+    "o:tracking": "no",
+    "o:tracking-opens": "no",
+    "o:tracking-clicks": "no",
   });
   // Mailboxes are addressed on the ROOT domain (sales@example.com) but only
   // the per-prefix Mailgun subdomain (sales.example.com) has MX records

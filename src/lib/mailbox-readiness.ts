@@ -101,6 +101,23 @@ async function salesSendsToday(admin: SupabaseClient, mailboxId: string, since: 
   return count ?? 0;
 }
 
+/** Max cold sends per sending DOMAIN per day, across all its mailboxes (Google counts reputation per domain). */
+export const domainDailySendCap = () => (Number(process.env.DOMAIN_DAILY_SEND_CAP) > 0 ? Number(process.env.DOMAIN_DAILY_SEND_CAP) : 100);
+
+async function domainCapReached(
+  admin: SupabaseClient,
+  all: { id: string; address: string }[],
+  m: { id: string; address: string },
+  dayStart: string
+): Promise<boolean> {
+  const domain = m.address.slice(m.address.lastIndexOf("@") + 1).toLowerCase();
+  const siblings = all.filter((x) => x.address.slice(x.address.lastIndexOf("@") + 1).toLowerCase() === domain);
+  if (siblings.length < 2) return false; // a single mailbox is already bound by its own (<= 30 while warming) limit
+  let total = 0;
+  for (const s of siblings) total += await salesSendsToday(admin, s.id, dayStart);
+  return total >= domainDailySendCap();
+}
+
 /**
  * Follow-ups still due today (or overdue) that are pinned to this mailbox because it sent their first email.
  * New first emails leave room for them (see follow-up-capacity.ts). Any lookup problem counts as 0 so a database
@@ -215,6 +232,8 @@ export async function reserveMailboxSlot(
     if (attempt > 0) await new Promise((r) => setTimeout(r, 40 + Math.random() * 160));
     const usedNow = await salesSendsToday(admin, m.id, dayStart);
     if (usedNow >= limit) break;
+    // Receivers count reputation per DOMAIN, so the sum over all of this domain's mailboxes is capped too.
+    if (await domainCapReached(admin, allMailboxes ?? [], m, dayStart)) break;
     if (reservedForFollowUps > 0 && !newEmailFits(usedNow, reservedForFollowUps, limit)) break;
 
     const { data: reserved, error } = await admin

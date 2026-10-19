@@ -10,6 +10,7 @@ import { bareDomain, buildTemplateEmail } from "@/lib/outreach-template";
 import { renderCustomTemplate } from "@/lib/custom-template";
 import { cleanOutreachEmail, lintOutreachEmail } from "@/lib/email-quality";
 import { sendMail, mailgunDomainForAddress, getMailboxReadiness } from "@/lib/mailgun";
+import { checkEmailAddress } from "@/lib/email-address-check";
 import { withUnsubscribeFooter, unsubscribeHeaders } from "@/lib/compliance";
 import { resolveFirstFollowUpDelayMs } from "@/lib/follow-up-config";
 import { DEFAULT_SEND_WINDOW, activeBlockIndex, planBlocks, resolveSendWindow } from "@/lib/send-window";
@@ -238,6 +239,14 @@ export async function sendBatchForClient(clientId: string) {
   // One lead per run: the next planned slot is picked up by the next scheduled run (see pacing above).
   for (let i = 0; i < 1 && i < eligibleLeads.length; i++) {
     const lead = eligibleLeads[i];
+    // Never spend a send (and a bounce on the sender's reputation) on an address that cannot receive mail. It is
+    // marked undeliverable so it leaves the queue; the next scheduled run picks the next lead.
+    const addressCheck = await checkEmailAddress(lead.email);
+    if (!addressCheck.ok) {
+      await admin.from("leads").update({ email_bounced: true }).eq("id", lead.id);
+      sent.push({ leadId: lead.id, mailbox: "-", result: "failed", error: `address check failed: ${addressCheck.reason}` });
+      continue;
+    }
     // The block's mailbox is the only one allowed here; daily-limit enforcement stays in reserveMailboxSlot (atomic).
     const reservation = await reserveMailboxSlot(admin, clientId, lead.id, { touch_number: 1, campaign_id: campaign.id }, { mailboxId: activeMailbox.id, timeZone: sendTz });
     if (!reservation.ok) {
