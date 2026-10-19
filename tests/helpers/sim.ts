@@ -44,6 +44,8 @@ export const ai = {
   /** Inbound-reply simulation: what the classifier says, and what the reply drafter writes. */
   classification: "UNCLEAR" as "BOOKING" | "HAPPY" | "ANGRY" | "UNCLEAR",
   replyCalls: [] as Record<string, unknown>[],
+  /** Simulates a Gemini outage/slowdown: classifyReply never answers. */
+  classifyHangs: false,
   replyBody: "Thanks for getting back to me. Happy to help with any questions you have.",
   defaultAidaBody: "",
   defaultFollowUpBody: "",
@@ -53,7 +55,7 @@ export const ai = {
     this.followUpSubject = "Totally different subject";
     this.followUpBody = this.defaultFollowUpBody;
     this.aidaSubject = "Faster follow-ups for agents";
-    this.classification = "UNCLEAR"; this.replyCalls = [];
+    this.classification = "UNCLEAR"; this.replyCalls = []; this.classifyHangs = false;
   },
 };
 
@@ -90,7 +92,7 @@ export async function loadApp() {
         const body = ai.rotateBodies && ai.followUpBody === ai.defaultFollowUpBody ? variants[(ai.followUpCalls.length - 1) % variants.length] : ai.followUpBody;
         return { subject: ai.followUpSubject, body };
       },
-      classifyReply: async () => ({ classification: ai.classification, confidence: 0.9, reason: "simulated" }),
+      classifyReply: async () => (ai.classifyHangs ? new Promise<never>(() => {}) : { classification: ai.classification, confidence: 0.9, reason: "simulated" }),
       generateMeetingTopic: async () => "Automating customer follow-ups",
       draftReplyEmail: async (params: Record<string, unknown>) => { ai.replyCalls.push(params); return { subject: "Re: your reply", body: ai.replyBody }; },
       draftOfferPhrases: async () => ({ offer: "automate customer follow-ups", benefit: "save hours every week" }),

@@ -13,6 +13,9 @@ import { classifyMailboxMatch } from "@/lib/mailbox-match";
 import { ensureBookingLink, leadMeetingEventName } from "@/lib/booking-link";
 import { createLeadMeetingLink, getFreshCalendlyToken } from "@/lib/calendly";
 
+// Gemini retries alone can take ~60s; without this Vercel may cut the function off mid-processing.
+export const maxDuration = 60;
+
 /**
  * Classifies an inbound reply with Gemini (real AI, 4-way: BOOKING / HAPPY /
  * ANGRY / UNCLEAR — see FINAL MASTER PROMPT §14) and sends a tone-matched
@@ -318,13 +321,9 @@ export async function POST(req: NextRequest) {
       (await assertDomainUsableByClient(admin, mailbox.client_id, mailboxDomain, { requireExplicitOwnership: externalDomainsForReply.has(mailboxDomain) })).usable &&
       !(await isDomainDisconnected(admin, mailbox.client_id, mailboxDomain));
 
-    // Classify first, always — a stop/unsubscribe request used to short-circuit
-    // before this and leave reply_classification NULL. The deterministic
-    // unsubscribe check below still decides the stop action; the model only
-    // labels the reply.
-    const history = await buildEmailHistory(admin, lead.client_id, lead.id, mailbox.id);
-    const { classification, confidence, reason } = await classifyReply(bodyPlain, history || undefined);
-
+    // A stop request is decided and applied BEFORE any AI call: an AI outage or a slow model
+    // (retries can take a minute, longer than the function may live) must never delay or lose an
+    // opt-out. The model only labels the reply afterwards, best effort and time-boxed.
     if (isUnsubscribeRequest(bodyStripped)) {
       await admin
         .from("leads")
@@ -334,12 +333,9 @@ export async function POST(req: NextRequest) {
           unsubscribed_at: new Date().toISOString(),
           next_follow_up_at: null,
           status: "dropped",
-          reply_classification: classification,
-          reply_confidence: confidence,
-          reply_reason: reason,
         })
         .eq("id", lead.id);
-      await storeInbound(mailbox.id, classification);
+      await storeInbound(mailbox.id, null);
 
       await incrementCampaignReplyCount(admin, lead.campaign_id);
 
@@ -370,8 +366,28 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      try {
+        const label = await Promise.race([
+          classifyReply(bodyPlain),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)),
+        ]);
+        if (label) {
+          await admin
+            .from("leads")
+            .update({ reply_classification: label.classification, reply_confidence: label.confidence, reply_reason: label.reason })
+            .eq("id", lead.id);
+          await admin.from("inbound_messages").update({ classification: label.classification }).eq("provider_message_id", messageId);
+        }
+      } catch {
+        // labelling is optional; the opt-out is already recorded
+      }
+
       return NextResponse.json({ ok: true, unsubscribed: true });
     }
+
+
+    const history = await buildEmailHistory(admin, lead.client_id, lead.id, mailbox.id);
+    const { classification, confidence, reason } = await classifyReply(bodyPlain, history || undefined);
 
     // Only Calendly configured for THIS client, never a fallback/placeholder
     // (spec §20, §28) — if it's missing, the drafted reply below just omits

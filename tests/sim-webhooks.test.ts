@@ -229,6 +229,18 @@ test("reply STOP: lead unsubscribed, dropped, follow-ups cleared, one confirmati
   assert.equal(S.mailer.sent.length, 1, "no follow-up after STOP");
 });
 
+test("reply STOP still unsubscribes and confirms when the AI classifier hangs (opt-out never waits on Gemini)", async () => {
+  const w = world();
+  S.ai.classifyHangs = true;
+  const r = await reply(w, "STOP");
+  assert.equal(r.json.unsubscribed, true);
+  const l = S.leadRow(id(w.lead));
+  assert.equal(l.unsubscribed, true);
+  assert.equal(l.status, "dropped");
+  assert.equal(l.next_follow_up_at, null);
+  assert.equal(S.mailer.sent.length, 1, "confirmation still sent");
+});
+
 test("other ways people opt out also work (unsubscribe / remove me / stop emailing me)", async () => {
   for (const text of ["Please unsubscribe me", "remove me from your list", "stop emailing me"]) {
     S.resetWorld();
