@@ -3,10 +3,15 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getMailgunDnsRecords } from "@/lib/mailgun";
 import { checkDomainDns, type DnsHealth, type DnsResolver } from "@/lib/dns-health-core";
 
+// Always ask well-known public resolvers (not whatever the host machine is configured with): the result is then the
+// same on every machine, and a router/ISP DNS that refuses c-ares connections (ECONNREFUSED) cannot break the check.
+const publicDns = new dns.Resolver({ timeout: 4000, tries: 2 });
+publicDns.setServers(["1.1.1.1", "8.8.8.8"]);
+
 export const nodeResolver: DnsResolver = {
-  resolveTxt: (n) => dns.resolveTxt(n),
-  resolveMx: (n) => dns.resolveMx(n),
-  resolveCname: (n) => dns.resolveCname(n),
+  resolveTxt: (n) => publicDns.resolveTxt(n),
+  resolveMx: (n) => publicDns.resolveMx(n),
+  resolveCname: (n) => publicDns.resolveCname(n),
 };
 
 /** Checks one domain against what Mailgun requires. Read-only against DNS and Mailgun. */
