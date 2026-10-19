@@ -17,7 +17,7 @@ interface Domain {
   id: string;
   domain: string;
   dns_status: string | null;
-  dns_health?: { checks: { kind: string; name: string; status: string; expected?: string }[] } | null;
+  dns_health?: { problem?: string; checks: { kind: string; name: string; status: string; expected?: string }[] } | null;
   dns_checked_at?: string | null;
 }
 interface Mailbox {
@@ -235,7 +235,10 @@ export default async function SettingsPage(props: {
             <div key={d.id} className="flex items-center justify-between rounded-md border border-black/[.08] px-4 py-3 text-sm dark:border-white/[.145]">
               <div>
                 <span>{d.domain}</span>
-                {d.dns_health && (
+                {d.dns_health?.problem === "not_in_mailgun" && (
+                  <p className="mt-1 text-xs text-red-600">❌ This domain is not set up in Mailgun, so it cannot send. Reconnect or re-provision it.</p>
+                )}
+                {d.dns_health && d.dns_health.checks.length > 0 && (
                   <ul className="mt-1 space-y-0.5 text-xs text-zinc-500">
                     {d.dns_health.checks.map((c) => (
                       <li key={`${c.kind}-${c.name}`}>

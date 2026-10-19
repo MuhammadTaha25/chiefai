@@ -1,7 +1,7 @@
 import { promises as dns } from "node:dns";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getMailgunDnsRecords } from "@/lib/mailgun";
-import { checkDomainDns, type DnsHealth, type DnsResolver } from "@/lib/dns-health-core";
+import { checkDomainDns, isMailgunDomainNotFound, notInMailgunHealth, type DnsHealth, type DnsResolver } from "@/lib/dns-health-core";
 
 // Always ask well-known public resolvers (not whatever the host machine is configured with): the result is then the
 // same on every machine, and a router/ISP DNS that refuses c-ares connections (ECONNREFUSED) cannot break the check.
@@ -16,7 +16,13 @@ export const nodeResolver: DnsResolver = {
 
 /** Checks one domain against what Mailgun requires. Read-only against DNS and Mailgun. */
 export async function checkDomain(domain: string): Promise<DnsHealth> {
-  const expected = await getMailgunDnsRecords(domain);
+  let expected;
+  try {
+    expected = await getMailgunDnsRecords(domain);
+  } catch (e) {
+    if (isMailgunDomainNotFound(e)) return notInMailgunHealth(domain);
+    throw e;
+  }
   return checkDomainDns(domain, expected, nodeResolver);
 }
 

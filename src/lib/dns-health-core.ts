@@ -39,6 +39,8 @@ export interface RecordCheck {
 
 export interface DnsHealth {
   domain: string;
+  /** Set when the domain could not be checked against Mailgun's requirements at all. */
+  problem?: "not_in_mailgun";
   checks: RecordCheck[];
   /** SPF + DKIM are what Mailgun needs to send; MX/CNAME/DMARC are reported but do not block sending. */
   sendingOk: boolean;
@@ -132,4 +134,14 @@ export async function checkDomainDns(domain: string, expected: ExpectedRecords, 
 
   const sendingOk = checks.filter((c) => c.kind === "spf" || c.kind === "dkim").every((c) => c.status === "ok");
   return { domain, checks, sendingOk, allOk: checks.every((c) => c.status === "ok") };
+}
+
+/** Result for a domain our DB lists as active but Mailgun does not know: it cannot send, and there is nothing to compare DNS to. */
+export function notInMailgunHealth(domain: string): DnsHealth {
+  return { domain, problem: "not_in_mailgun", checks: [], sendingOk: false, allOk: false };
+}
+
+/** True for the error getMailgunDnsRecords throws when Mailgun answers 404 for the domain. */
+export function isMailgunDomainNotFound(err: unknown): boolean {
+  return /Mailgun get domain failed: 404/.test((err as Error)?.message ?? "");
 }
