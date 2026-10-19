@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getUnhealthyMailboxIds } from "@/lib/mailbox-health";
 import { getMailboxReadiness } from "@/lib/mailgun";
+import { getSendingBrokenDomains } from "@/lib/dns-health-gate";
 import { effectiveDailyLimit } from "@/lib/warmup-schedule";
 import { startOfLocalDay } from "@/lib/company-facts";
 import { followUpsPinnedTo, newEmailFits, originalMailboxByLead } from "@/lib/follow-up-capacity";
@@ -41,8 +42,10 @@ export async function pickReadyMailbox(
   // Prefer healthy mailboxes; an unhealthy one (high bounce/complaint rate) is only used if nothing else is ready,
   // because a reply to someone who already wrote to us is not cold outreach.
   const unhealthy = await getUnhealthyMailboxIds(admin, clientId);
+  const dnsBroken = await getSendingBrokenDomains(admin, clientId); // empty unless DNS_HEALTH_PAUSE_SENDING=1
   let fallback: { id: string; address: string } | null = null;
   for (const m of ordered) {
+    if (dnsBroken.has(m.address.slice(m.address.lastIndexOf("@") + 1).trim().toLowerCase())) continue;
     if ((await getMailboxReadiness(m.address)) !== "ready") continue;
     if (!unhealthy.has(m.id)) return m;
     fallback ??= m;
