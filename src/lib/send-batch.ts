@@ -14,6 +14,7 @@ import { checkEmailAddress } from "@/lib/email-address-check";
 import { withUnsubscribeFooter, unsubscribeHeaders } from "@/lib/compliance";
 import { resolveFirstFollowUpDelayMs } from "@/lib/follow-up-config";
 import { DEFAULT_SEND_WINDOW, activeBlockIndex, planBlocks, resolveSendWindow } from "@/lib/send-window";
+import { plannedGapMs } from "@/lib/send-jitter";
 import { isValidTimeZone, localClock } from "@/lib/social-schedule";
 import { resolveDailySendCap } from "@/lib/send-cap";
 import { effectiveDailyLimit } from "@/lib/mailbox-readiness";
@@ -178,7 +179,7 @@ export async function sendBatchForClient(clientId: string) {
     .order("sent_at", { ascending: false })
     .limit(1)
     .maybeSingle<{ sent_at: string }>();
-  if (lastSentRow && Date.now() - Date.parse(lastSentRow.sent_at) < plan.gapUsed * 60_000) {
+  if (lastSentRow && Date.now() - Date.parse(lastSentRow.sent_at) < plannedGapMs(plan.gapUsed, lastSentRow.sent_at)) {
     return { clientId, campaignId: campaign.id, result: "skipped", detail: `waiting for the planned ${plan.gapUsed}-minute gap` };
   }
 

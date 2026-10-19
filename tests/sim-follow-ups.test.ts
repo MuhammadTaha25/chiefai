@@ -310,9 +310,9 @@ test("cron mode: each client is capped per run, each lead is served only from it
   const addr = new Map<string, string>([[A.cid, A.mb.address as string], [B.cid, B.mb.address as string]]);
   for (const m of S.mailer.sent) assert.ok(m.from.includes(addr.get(owner.get(m.to)!)!), "sent from the owning client's own mailbox");
   // The rest go out on the next run.
-  S.setClock(S.T0 + 5 * S.MIN);
+  S.setClock(S.T0 + 15 * S.MIN);
   const r2 = await app.followUps.runFollowUpBatch({ clientIdFilter: null, isCron: true });
-  assert.equal(r2.results.filter((x) => x.result === "sent").length, 2, "the next run (5 min later) sends one more per client");
+  assert.equal(r2.results.filter((x) => x.result === "sent").length, 2, "a later run (past the random pacing gap) sends one more per client");
 });
 
 test("pacing: a client's follow-ups are never sent back-to-back, even in one manual run", async () => {
@@ -321,9 +321,9 @@ test("pacing: a client's follow-ups are never sent back-to-back, even in one man
   const r = await run(w.cid);
   assert.equal(r.results.filter((x) => x.result === "sent").length, 1, "only the first goes; the rest wait");
   assert.ok(r.results.filter((x) => x.result === "skipped").every((x) => /pacing/.test(x.detail ?? "")));
-  S.setClock(S.now() + 5 * S.MIN);
+  S.setClock(S.now() + 15 * S.MIN);
   const r2 = await run(w.cid);
-  assert.equal(r2.results.filter((x) => x.result === "sent").length, 1, "5 minutes later the next one goes");
+  assert.equal(r2.results.filter((x) => x.result === "sent").length, 1, "after the random gap (max 10 min) the next one goes");
 });
 
 test("a manual run for one client never touches another client's leads", async () => {
