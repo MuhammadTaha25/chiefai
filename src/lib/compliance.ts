@@ -69,8 +69,9 @@ export function isAutomatedMessage(sender: string, messageHeadersJson: string | 
  */
 export function withUnsubscribeFooter(body: string, opts: { company: string | null | undefined; postalAddress?: string | null }): string {
   const lines = ['Not interested? Reply "STOP" and we will not email you again.'];
-  const who = [opts.company?.trim(), opts.postalAddress?.trim()].filter(Boolean).join(" · ");
-  if (who) lines.push(who);
+  // The company name is already in the sender's signature, so it is repeated here only next to a postal address.
+  const address = opts.postalAddress?.trim();
+  if (address) lines.push([opts.company?.trim(), address].filter(Boolean).join(" · "));
   return [body.trimEnd(), "", "--", ...lines].join("\n");
 }
 
