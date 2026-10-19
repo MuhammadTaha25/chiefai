@@ -78,3 +78,13 @@ test("a lookup failure (timeout) is not reported as 'missing': it throws so the 
   };
   await assert.rejects(() => checkDomainDns("acme.com", expected, flaky));
 });
+
+import { isMailgunDomainNotFound, notInMailgunHealth } from "../src/lib/dns-health-core.ts";
+
+test("Mailgun 404 is recognised and reported as a clear, sending-blocking problem", () => {
+  assert.equal(isMailgunDomainNotFound(new Error('Mailgun get domain failed: 404 {"message":"Domain not found"}')), true);
+  assert.equal(isMailgunDomainNotFound(new Error("Mailgun get domain failed: 500 oops")), false);
+  const h = notInMailgunHealth("x.com");
+  assert.equal(h.problem, "not_in_mailgun");
+  assert.equal(h.sendingOk, false);
+});
