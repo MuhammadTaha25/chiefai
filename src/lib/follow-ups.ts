@@ -8,6 +8,7 @@ import { applyGreetingAndSignoff, cleanOutreachEmail, lintOutreachEmail } from "
 import { autoSendSince } from "@/lib/campaign";
 import { resolveFollowUpIntervalMs, planFollowUp } from "@/lib/follow-up-config";
 import { resolveSendWindow, withinSendWindow } from "@/lib/send-window";
+import { followUpGapMs } from "@/lib/send-jitter";
 import { isValidTimeZone, localClock } from "@/lib/social-schedule";
 import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
 
@@ -58,7 +59,7 @@ interface DueLead {
 // one domain is a spam signal), and one tenant's failing leads cannot starve others.
 const MAX_LEADS_PER_CLIENT = 1;
 // If anything from this client went out in the last few minutes (a first email or another follow-up), wait for the next run.
-const MIN_GAP_BETWEEN_CLIENT_SENDS_MS = 4 * 60_000;
+// Random 3-10 min wait (repeatable per previous send), not a fixed gap: see send-jitter.ts.
 
 // Puts a claimed lead back in the queue after a problem. Guarded with `is null` so it can never overwrite a
 // next_follow_up_at that something else has set in the meantime.
@@ -208,7 +209,7 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
         .order("sent_at", { ascending: false })
         .limit(1)
         .maybeSingle<{ sent_at: string }>();
-      if (lastSend && Date.now() - Date.parse(lastSend.sent_at) < MIN_GAP_BETWEEN_CLIENT_SENDS_MS) {
+      if (lastSend && Date.now() - Date.parse(lastSend.sent_at) < followUpGapMs(lastSend.sent_at)) {
         results.push({ leadId: lead.id, result: "skipped", detail: "pacing: waiting a few minutes after this client's last send" });
         continue;
       }
