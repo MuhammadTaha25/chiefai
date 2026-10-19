@@ -1,8 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getUnhealthyMailboxIds } from "@/lib/mailbox-health";
+import { getMailboxHealth, getUnhealthyMailboxIds } from "@/lib/mailbox-health";
 import { getMailboxReadiness } from "@/lib/mailgun";
 import { getSendingBrokenDomains } from "@/lib/dns-health-gate";
-import { effectiveDailyLimit } from "@/lib/warmup-schedule";
+import { domainCapForAge, effectiveDailyLimit } from "@/lib/warmup-schedule";
 import { startOfLocalDay } from "@/lib/company-facts";
 import { followUpsPinnedTo, newEmailFits, originalMailboxByLead } from "@/lib/follow-up-capacity";
 
@@ -106,7 +106,7 @@ export const domainDailySendCap = () => (Number(process.env.DOMAIN_DAILY_SEND_CA
 
 async function domainCapReached(
   admin: SupabaseClient,
-  all: { id: string; address: string }[],
+  all: { id: string; address: string; created_at?: string | null }[],
   m: { id: string; address: string },
   dayStart: string
 ): Promise<boolean> {
@@ -115,7 +115,10 @@ async function domainCapReached(
   if (siblings.length < 2) return false; // a single mailbox is already bound by its own (<= 30 while warming) limit
   let total = 0;
   for (const s of siblings) total += await salesSendsToday(admin, s.id, dayStart);
-  return total >= domainDailySendCap();
+  // A young domain gets a lower ceiling that rises with its age (oldest mailbox on the domain), up to the env cap.
+  const oldest = Math.min(...siblings.map((x) => (x.created_at ? Date.parse(x.created_at) : Date.now())));
+  const ageDays = Math.max(0, Math.floor((Date.now() - oldest) / 86400000));
+  return total >= domainCapForAge(ageDays, domainDailySendCap());
 }
 
 /**
@@ -204,7 +207,7 @@ export async function reserveMailboxSlot(
   // daily limit is skipped below, so sending switches to the next one automatically.
   // Health failover: a mailbox with a high recent bounce/complaint rate is skipped for NEW sales sends so mail
   // shifts to the tenant's other healthy mailboxes (see mailbox-health.ts).
-  const unhealthy = await getUnhealthyMailboxIds(admin, clientId);
+  const { unhealthy, slow } = await getMailboxHealth(admin, clientId);
   let skippedUnhealthy = false;
   const readyMailboxes: { m: (typeof mailboxes)[number]; used: number }[] = [];
   for (const m of mailboxes) {
@@ -222,7 +225,7 @@ export async function reserveMailboxSlot(
   let sawReady = false;
   for (const m of ordered) {
     sawReady = true;
-    const limit = effectiveDailyLimit(m, Date.now(), !unhealthy.has(m.id));
+    const limit = effectiveDailyLimit(m, Date.now(), !unhealthy.has(m.id), slow.has(m.id));
     // A NEW first email (touch 1) only gets the slots left after the follow-ups still due today that are pinned
     // to this mailbox, so follow-ups are not starved by new sends. Follow-ups themselves use the full limit.
     const reservedForFollowUps = row.touch_number === 1 ? await dueFollowUpsPinnedTo(admin, clientId, m.id, dayStart) : 0;

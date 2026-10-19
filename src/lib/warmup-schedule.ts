@@ -51,6 +51,28 @@ export function effectiveDailyLimit(
   m: { daily_send_limit: number | null; created_at?: string | null },
   now = Date.now(),
   healthy = true,
+  slow = false,
+): number {
+  const limit = baseDailyLimit(m, now, healthy);
+  // Early warning (bounce rate drifting up): half the limit instead of letting the ramp keep climbing.
+  return slow && limit > 0 ? Math.max(1, Math.ceil(limit / 2)) : limit;
+}
+
+/**
+ * Domain-wide daily ceiling by the domain's age (days since its oldest mailbox was created). Receivers judge
+ * reputation per domain, so several young mailboxes each ramping on their own must not add up to a burst:
+ *   cap(d) = min(ceiling, floor(20 + 80 × (1 − e^(−d/21))))   d=0 → 20, d=10 → 50, d=25 → 76, d=45 → 90
+ * `ceiling` is the operator's DOMAIN_DAILY_SEND_CAP (default 100).
+ */
+export function domainCapForAge(ageDays: number, ceiling: number): number {
+  const d = Math.max(0, ageDays);
+  return Math.min(ceiling, Math.floor(20 + 80 * (1 - Math.exp(-d / 21))));
+}
+
+function baseDailyLimit(
+  m: { daily_send_limit: number | null; created_at?: string | null },
+  now: number,
+  healthy: boolean,
 ): number {
   const ageDays = m.created_at
     ? Math.max(0, Math.floor((now - new Date(m.created_at).getTime()) / 86400000))
