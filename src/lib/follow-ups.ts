@@ -8,7 +8,7 @@ import { applyGreetingAndSignoff, cleanOutreachEmail, lintOutreachEmail } from "
 import { autoSendSince } from "@/lib/campaign";
 import { resolveFollowUpIntervalMs, planFollowUp } from "@/lib/follow-up-config";
 import { resolveSendWindow, withinSendWindow } from "@/lib/send-window";
-import { followUpGapMs } from "@/lib/send-jitter";
+import { followUpGapMs, stillWaiting } from "@/lib/send-jitter";
 import { isValidTimeZone, localClock } from "@/lib/social-schedule";
 import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
 
@@ -209,7 +209,7 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
         .order("sent_at", { ascending: false })
         .limit(1)
         .maybeSingle<{ sent_at: string }>();
-      if (lastSend && Date.now() - Date.parse(lastSend.sent_at) < followUpGapMs(lastSend.sent_at)) {
+      if (lastSend && stillWaiting(lastSend.sent_at, followUpGapMs(lastSend.sent_at))) {
         results.push({ leadId: lead.id, result: "skipped", detail: "pacing: waiting a few minutes after this client's last send" });
         continue;
       }

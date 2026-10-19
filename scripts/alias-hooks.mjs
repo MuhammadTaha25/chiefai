@@ -11,5 +11,6 @@ export async function resolve(specifier, context, next) {
       if (existsSync(candidate)) return next(pathToFileURL(candidate).href, context);
     }
   }
+  if (specifier === "next/server") return next("next/server.js", context);
   return next(specifier, context);
 }

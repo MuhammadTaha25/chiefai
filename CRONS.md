@@ -18,6 +18,7 @@ https://cron-job.org: create one job per row, method **GET**, URL `https://<your
 | `*/30 * * * *` | `/api/cron/calendly-sync` |
 | `*/30 * * * *` | `/api/ads/sync` |
 | `*/5 * * * *` | `/api/cron/social-initial` |
+| `*/5 * * * *` | `/api/cron/social-sync` |
 
 Only the first, second and last rows matter for social media (scheduled posts/stories and the first-connection cycle).
 Comment and DM replies do NOT need a scheduler — they arrive by Zernio webhook.

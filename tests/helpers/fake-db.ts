@@ -55,6 +55,7 @@ class Query implements PromiseLike<Result> {
   lt(col: string, v: unknown) { this.filters.push((r) => !isNil(r[col]) && (r[col] as never) < (v as never)); return this; }
   lte(col: string, v: unknown) { this.filters.push((r) => !isNil(r[col]) && (r[col] as never) <= (v as never)); return this; }
   in(col: string, vals: unknown[]) { this.filters.push((r) => vals.includes(r[col])); return this; }
+  ilike(col: string, pat: string) { this.filters.push((r) => typeof r[col] === "string" && new RegExp(likeToRegExp(pat).source, "is").test(r[col])); return this; }
   like(col: string, pat: string) { this.filters.push((r) => typeof r[col] === "string" && likeToRegExp(pat).test(r[col])); return this; }
   is(col: string, v: null | boolean) {
     this.filters.push((r) => (v === null ? isNil(r[col]) : r[col] === v));
@@ -118,12 +119,19 @@ class Query implements PromiseLike<Result> {
       }
       case "insert": {
         const list = Array.isArray(this.payload) ? this.payload : [this.payload as Row];
+        // Unique constraints the real tables have (so "already processed" paths behave like Postgres: error 23505).
+        const ucol = this.db.unique.get(this.table);
+        if (ucol && list.some((r) => this.db.rows(this.table).some((e) => e[ucol] === r[ucol]))) {
+          return { data: null, error: { message: "duplicate key value violates unique constraint", code: "23505" } } as unknown as Result;
+        }
         const inserted = list.map((r) => this.db.insertRow(this.table, r));
         return this.returning ? this.shape(inserted) : { data: null, error: null };
       }
       case "update": {
         const rows = this.matching();
-        for (const r of rows) Object.assign(r, clone(this.payload as Row));
+        // PostgREST drops undefined fields from the JSON body, so they never overwrite a column.
+        const patch = Object.fromEntries(Object.entries(this.payload as Row).filter(([, v]) => v !== undefined));
+        for (const r of rows) Object.assign(r, clone(patch));
         return this.returning ? this.shape(rows) : { data: null, error: null };
       }
       case "delete": {
@@ -155,6 +163,8 @@ export class FakeDb {
   private tables = new Map<string, Row[]>();
   /** Test hook: make the next N inserts into a table fail (simulates a database error). */
   failInsertsInto = new Map<string, number>();
+  /** table -> unique column; a second insert of the same value returns Postgres error 23505. */
+  unique = new Map<string, string>([["processed_provider_events", "id"], ["processed_inbound_messages", "message_id"]]);
 
   rows(table: string): Row[] {
     let t = this.tables.get(table);

@@ -41,6 +41,10 @@ export const ai = {
   aidaSubject: "Faster follow-ups for agents",
   aidaBody:
     "Hi Sam,\n\nMost real estate teams lose warm enquiries because replies come hours late. We set up automatic replies and follow-ups so every enquiry gets an answer within minutes, and your agents only step in once a buyer is ready to talk.\n\nWould it be useful if I sent over a short example of how it works for an agency your size?\n\nBest,\nTest Co",
+  /** Inbound-reply simulation: what the classifier says, and what the reply drafter writes. */
+  classification: "UNCLEAR" as "BOOKING" | "HAPPY" | "ANGRY" | "UNCLEAR",
+  replyCalls: [] as Record<string, unknown>[],
+  replyBody: "Thanks for getting back to me. Happy to help with any questions you have.",
   defaultAidaBody: "",
   defaultFollowUpBody: "",
   reset() {
@@ -49,6 +53,7 @@ export const ai = {
     this.followUpSubject = "Totally different subject";
     this.followUpBody = this.defaultFollowUpBody;
     this.aidaSubject = "Faster follow-ups for agents";
+    this.classification = "UNCLEAR"; this.replyCalls = [];
   },
 };
 
@@ -85,6 +90,9 @@ export async function loadApp() {
         const body = ai.rotateBodies && ai.followUpBody === ai.defaultFollowUpBody ? variants[(ai.followUpCalls.length - 1) % variants.length] : ai.followUpBody;
         return { subject: ai.followUpSubject, body };
       },
+      classifyReply: async () => ({ classification: ai.classification, confidence: 0.9, reason: "simulated" }),
+      generateMeetingTopic: async () => "Automating customer follow-ups",
+      draftReplyEmail: async (params: Record<string, unknown>) => { ai.replyCalls.push(params); return { subject: "Re: your reply", body: ai.replyBody }; },
       draftOfferPhrases: async () => ({ offer: "automate customer follow-ups", benefit: "save hours every week" }),
       draftAidaEmail: async (params: Record<string, unknown>) => {
         ai.aidaCalls.push(params);
@@ -93,6 +101,9 @@ export async function loadApp() {
       },
     },
   });
+  mock.module(src("lib/calendly.ts"), { namedExports: { getFreshCalendlyToken: async () => null, createLeadMeetingLink: async () => null } });
+  mock.module(src("lib/business-context.ts"), { namedExports: { getClientBusinessContext: async () => ({}), formatBusinessContext: () => "" } });
+  mock.module(src("lib/email-history.ts"), { namedExports: { buildEmailHistory: async () => "" } });
   mock.module(src("lib/vibe-prospecting-mcp.ts"), { namedExports: { fetchCompanyDescriptionViaMcp: async () => null } });
 
   const [followUps, sendBatch, readiness, warmup] = await Promise.all([
@@ -102,6 +113,16 @@ export async function loadApp() {
     import("../../src/lib/warmup-schedule.ts"),
   ]);
   return { followUps, sendBatch, readiness, warmup };
+}
+
+/** The webhook/cron routes (events, inbound reply, bounce-retry). Call after loadApp() so the same mocks apply. */
+export async function loadRoutes() {
+  const [events, inbound, bounceRetry] = await Promise.all([
+    import("../../src/app/api/webhooks/mailgun/events/route.ts"),
+    import("../../src/app/api/webhooks/mailgun/route.ts"),
+    import("../../src/app/api/cron/bounce-retry/route.ts"),
+  ]);
+  return { events, inbound, bounceRetry };
 }
 
 // ---------------------------------------------------------------- time
