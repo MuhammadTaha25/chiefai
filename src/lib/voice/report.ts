@@ -74,7 +74,7 @@ export function spokenSummary(business: string, f: CompanyFacts): string {
     }
   } else if (f.ad_spend.daily_budget_total > 0) {
     parts.push(
-      `Ad campaigns have a planned budget of ${f.ad_spend.daily_budget_total} per day, but no performance has ever been recorded, so I do not have the actual spend or return on ad spend. I will not guess those.`
+      `Launched ad campaigns have a planned budget of ${f.ad_spend.daily_budget_total} per day (the currency is not recorded, so I do not name one), but no performance has ever been recorded, so I do not have the actual spend or return on ad spend. I will not guess those.`
     );
   } else {
     parts.push("No ad campaigns are running.");

@@ -31,7 +31,7 @@ export interface CompanyFacts {
    * Ad money. `actual_spend`/`roi` are null on purpose when the platform-level
    * performance data has not been synced (ad_performance is empty today) — the
    * agent must say it does not have the figure rather than report a guess.
-   * `daily_budget_total` is the PLANNED budget from the campaigns we launched.
+   * `daily_budget_total` is the PLANNED budget of LAUNCHED campaigns only. No currency is stored anywhere, so none may be named.
    */
   ad_spend: {
     campaigns_by_status: Record<string, number>;
@@ -162,11 +162,13 @@ export async function getCompanyFacts(admin: SupabaseClient, clientId: string, t
   // table is empty would be inventing one.
   const { data: budgetRows } = await admin
     .from("ad_campaigns")
-    .select("id, daily_budget")
+    .select("id, daily_budget, status")
     .eq("client_id", clientId)
     .limit(2000);
+  // Only campaigns that were actually launched carry a real budget; drafts, pending-approval and failed ones
+  // would otherwise inflate the figure (a client with one live 300 campaign and five unlaunched ones read as 906).
   const dailyBudgetTotal = (budgetRows ?? []).reduce(
-    (s: number, r: { daily_budget: number | null }) => s + (Number(r.daily_budget) || 0),
+    (s: number, r: { daily_budget: number | null; status: string | null }) => (r.status === "launched" ? s + (Number(r.daily_budget) || 0) : s),
     0
   );
 
