@@ -167,8 +167,8 @@ export default function MailboxSentEmailsModal({
                   </div>
                   {selected.delivery_status === "bounced" && (
                     <p className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-800 dark:bg-red-950 dark:text-red-300">
-                      This email bounced — the recipient&apos;s address doesn&apos;t exist or can&apos;t receive mail.
-                      Consider marking this lead&apos;s email as invalid.
+                      This email bounced and was not delivered. The address may not exist, or the receiving provider may have
+                      refused the message. The exact reason is not shown yet.
                     </p>
                   )}
                   <div className="mt-3 flex items-center justify-between border-b border-black/[.08] pb-4 dark:border-white/[.145]">
