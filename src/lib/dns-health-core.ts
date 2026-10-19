@@ -55,11 +55,15 @@ export function relativeToFqdn(name: string, domain: string): string {
   return n.endsWith(host(domain)) ? n : `${n}.${host(domain)}`;
 }
 
+/** "Nothing published" (NXDOMAIN/NODATA) is an answer; a timeout or refused/failed lookup is NOT, so it propagates and the caller keeps the previous result. */
+const NOT_PUBLISHED = new Set(["ENODATA", "ENOTFOUND", "NXDOMAIN"]);
 async function safe<T>(p: Promise<T>, fallback: T): Promise<T> {
   try {
     return await p;
-  } catch {
-    return fallback; // NXDOMAIN/NODATA/timeouts all mean "nothing usable published"
+  } catch (e) {
+    const code = (e as { code?: string }).code;
+    if (code && NOT_PUBLISHED.has(code)) return fallback;
+    throw e;
   }
 }
 

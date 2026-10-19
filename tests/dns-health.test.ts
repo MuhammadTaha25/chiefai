@@ -12,9 +12,9 @@ const expected: ExpectedRecords = {
 };
 
 const resolver = (txt: Record<string, string[][]>, mx: string[] = ["mxa.mailgun.org.", "mxb.mailgun.org."], cname: Record<string, string[]> = { "email.acme.com": ["mailgun.org."] }): DnsResolver => ({
-  resolveTxt: async (n) => txt[n] ?? Promise.reject(new Error("ENODATA")),
+  resolveTxt: async (n) => txt[n] ?? Promise.reject(Object.assign(new Error("n"), { code: "ENODATA" })),
   resolveMx: async () => mx.map((exchange) => ({ exchange, priority: 10 })),
-  resolveCname: async (n) => cname[n] ?? Promise.reject(new Error("ENODATA")),
+  resolveCname: async (n) => cname[n] ?? Promise.reject(Object.assign(new Error("n"), { code: "ENODATA" })),
 });
 
 const good = {
@@ -68,4 +68,13 @@ test("MX and CNAME problems are reported without blocking sending", async () => 
   assert.equal(kind(h, "mx").status, "mismatch");
   assert.equal(kind(h, "cname").status, "missing");
   assert.equal(h.sendingOk, true);
+});
+
+test("a lookup failure (timeout) is not reported as 'missing': it throws so the old result is kept", async () => {
+  const flaky: DnsResolver = {
+    resolveTxt: async () => Promise.reject(Object.assign(new Error("t"), { code: "ETIMEOUT" })),
+    resolveMx: async () => [],
+    resolveCname: async () => [],
+  };
+  await assert.rejects(() => checkDomainDns("acme.com", expected, flaky));
 });
