@@ -51,7 +51,7 @@ function leadDisplay(lead: Lead): { label: string; cls: string; stopped: boolean
   if (lead.booked) return { label: "Booked", cls: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300", stopped: true };
   if (lead.unsubscribed) return { label: "Stopped — unsubscribed", cls: red, stopped: true };
   if (lead.complained) return { label: "Stopped — complaint", cls: red, stopped: true };
-  if (lead.email_bounced) return { label: "Bounced — invalid address", cls: red, stopped: true };
+  if (lead.email_bounced) return { label: "Bounced — email not delivered", cls: red, stopped: true };
   if (lead.bounce_type === "temporary") {
     const retryDate = lead.bounce_retry_after
       ? new Date(lead.bounce_retry_after).toLocaleString("en-US", { dateStyle: "short", timeStyle: "short" })
