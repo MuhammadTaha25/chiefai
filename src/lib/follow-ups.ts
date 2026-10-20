@@ -7,7 +7,7 @@ import { draftFollowUpEmail } from "@/lib/gemini";
 import { applyGreetingAndSignoff, cleanOutreachEmail, lintOutreachEmail } from "@/lib/email-quality";
 import { autoSendSince } from "@/lib/campaign";
 import { resolveFollowUpIntervalMs, planFollowUp } from "@/lib/follow-up-config";
-import { resolveSendWindow, withinSendWindow } from "@/lib/send-window";
+import { isSendWindowBroken, resolveSendWindow, withinSendWindow } from "@/lib/send-window";
 import { followUpGapMs, stillWaiting } from "@/lib/send-jitter";
 import { isValidTimeZone, localClock } from "@/lib/social-schedule";
 import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDisconnected } from "@/lib/domain-ownership";
@@ -190,8 +190,10 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
     const tz = camp?.timezone ?? c?.timezone;
     let open = true;
     if (isValidTimeZone(tz)) {
-      const w = resolveSendWindow(camp?.send_window_start ?? c?.outreach_send_start, camp?.send_window_end ?? c?.outreach_send_end);
-      open = withinSendWindow(w, localClock(tz).minutes);
+      const ws = camp?.send_window_start ?? c?.outreach_send_start;
+      const we = camp?.send_window_end ?? c?.outreach_send_end;
+      // A configured but unusable window keeps follow-ups closed too (never widens to the default).
+      open = isSendWindowBroken(ws, we) ? false : withinSendWindow(resolveSendWindow(ws, we), localClock(tz).minutes);
     }
     windowOpenByKey.set(key, open);
     return open;

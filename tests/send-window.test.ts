@@ -128,3 +128,16 @@ test("blocks: 6 to 10 mailboxes all fit 50 a day across 08:00-24:00, gaps aligne
     assert.ok(n * plan.perMailbox >= 50, `capacity for ${n} mailboxes`);
   }
 });
+
+import { isSendWindowBroken } from "../src/lib/send-window.ts";
+import test2 from "node:test";
+import assert2 from "node:assert/strict";
+test2("a configured but unusable window is broken (never widens to the default)", () => {
+  assert2.equal(isSendWindowBroken("03:00:00", "03:01:00"), true); // under 5 minutes
+  assert2.equal(isSendWindowBroken("xx", "10:00"), true);
+  assert2.equal(isSendWindowBroken("08:00", null), true);
+  assert2.equal(isSendWindowBroken("08:00:00", "22:00:00"), false);
+  assert2.equal(isSendWindowBroken("22:00", "06:00"), false); // overnight is fine
+  assert2.equal(isSendWindowBroken(null, null), false); // unset uses the default
+  assert2.equal(isSendWindowBroken("", ""), false);
+});

@@ -222,6 +222,23 @@ export function resolveSendWindow(start: unknown, end: unknown): SendWindow {
   return { startMin: s, endMin: e };
 }
 
+/**
+ * True when a window HAS been configured (either end set) but cannot be used: unreadable times, shorter than 5
+ * minutes or longer than 24 hours. Sending must then stay closed, not silently fall back to the default window,
+ * because the owner meant to restrict sending and a typo must never widen it. An unset window (both ends empty)
+ * is not broken: it simply uses the default.
+ */
+export function isSendWindowBroken(start: unknown, end: unknown): boolean {
+  const set = (v: unknown) => typeof v === "string" && v.trim() !== "";
+  if (!set(start) && !set(end)) return false;
+  const s = parseClockMinutes(start);
+  const e0 = parseClockMinutes(end);
+  if (s === null || e0 === null) return true;
+  if (e0 === s) return false; // historic behaviour: same start and end means default
+  const e = e0 > s ? e0 : e0 + 24 * 60;
+  return e - s < 5 || e - s > 24 * 60;
+}
+
 /** The cron that drives sending runs every 5 minutes, so a planned gap is rounded down to that grid (never below 5). */
 export const TICK_MINUTES = 5;
 
