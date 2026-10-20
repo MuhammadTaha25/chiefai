@@ -13,7 +13,7 @@ import { sendMail, mailgunDomainForAddress, getMailboxReadiness } from "@/lib/ma
 import { checkEmailAddress } from "@/lib/email-address-check";
 import { withUnsubscribeFooter, unsubscribeHeaders } from "@/lib/compliance";
 import { resolveFirstFollowUpDelayMs } from "@/lib/follow-up-config";
-import { DEFAULT_SEND_WINDOW, activeBlockIndex, planBlocks, resolveSendWindow } from "@/lib/send-window";
+import { DEFAULT_SEND_WINDOW, activeBlockIndex, isSendWindowBroken, planBlocks, resolveSendWindow } from "@/lib/send-window";
 import { plannedGapMs, stillWaiting } from "@/lib/send-jitter";
 import { isValidTimeZone, localClock } from "@/lib/social-schedule";
 import { resolveDailySendCap } from "@/lib/send-cap";
@@ -119,6 +119,9 @@ export async function sendBatchForClient(clientId: string) {
     return { clientId, campaignId: campaign.id, result: "skipped", detail: "daily limit already reached" };
   }
 
+  if (isSendWindowBroken(resolvedWindowStart, resolvedWindowEnd)) {
+    return { clientId, campaignId: campaign.id, result: "skipped", detail: "send window is invalid (needs 5 minutes to 24 hours, as HH:MM) - sending stays closed until it is fixed in Settings" };
+  }
   const sendWindow = resolveSendWindow(resolvedWindowStart, resolvedWindowEnd);
   const usingDefaultWindow = sendWindow === DEFAULT_SEND_WINDOW;
   const nowMinute = localClock(sendTz).minutes;
