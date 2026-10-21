@@ -214,6 +214,8 @@ export async function sendBatchForClient(clientId: string) {
     .from("lead_gen_jobs")
     .select("criteria")
     .eq("client_id", clientId)
+    // A failed or blocked form submission must not replace the pitch of the last one that worked.
+    .eq("status", "completed")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle<{ criteria: Record<string, unknown> }>();

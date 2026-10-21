@@ -68,3 +68,9 @@ test("website in the signature is a bare domain, so a real client's site never t
   assert.ok(e.body.endsWith("Infomist\ninfomist.com"));
   assert.deepEqual(lintOutreachEmail(e), []);
 });
+
+test("an industry slug with underscores reads as plain words in the opener", () => {
+  const e = buildTemplateEmail({ ...vars, industry: "real_estate" });
+  assert.match(e.body, /works in real estate,/);
+  assert.doesNotMatch(e.body, /real_estate/);
+});

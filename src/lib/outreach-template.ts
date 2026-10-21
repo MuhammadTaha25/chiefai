@@ -52,7 +52,8 @@ const stripEndPunct = (s: string) => s.replace(/[.!?\s]+$/, "");
 export function buildTemplateEmail(v: TemplateVars): { subject: string; body: string } {
   const first = tidy(v.firstName).split(" ")[0];
   const company = tidy(v.leadCompany) || "your company";
-  const industry = tidy(v.industry);
+  // A stored slug like "real_estate" must read as "real estate" in a sentence.
+  const industry = tidy(v.industry).replace(/[_]+/g, " ").replace(/\s+/g, " ");
 
   // Opener: the most specific fact we actually have. Industry wins (unchanged behaviour); otherwise the
   // recipient's own job title; otherwise the generic line. Nothing is invented in any branch.
