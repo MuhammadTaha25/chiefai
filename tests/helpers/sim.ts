@@ -159,7 +159,7 @@ export function seedClient(over: Row = {}): Row {
 }
 export function seedJob(clientId: string, criteria: Row = {}) {
   db.rows("lead_gen_jobs").push({
-    id: uid("job"), client_id: clientId, created_at: new Date(now()).toISOString(),
+    id: uid("job"), client_id: clientId, status: "completed", created_at: new Date(now()).toISOString(),
     criteria: { what_you_sell: "AI automation for real estate agencies", follow_ups: "3 follow-ups", follow_up_delay_days: 0.01, ...criteria },
   });
 }
