@@ -229,6 +229,18 @@ test("reply STOP: lead unsubscribed, dropped, follow-ups cleared, one confirmati
   assert.equal(S.mailer.sent.length, 1, "no follow-up after STOP");
 });
 
+test("reply STOP from a DIFFERENT address than we wrote to still stops that lead (matched by the thread)", async () => {
+  const w = world();
+  S.ai.classification = "ANGRY";
+  const r = await reply(w, "STOP", { sender: "someone.else@forwarded.test" });
+  assert.equal(r.json.unsubscribed, true);
+  const l = S.leadRow(id(w.lead));
+  assert.equal(l.unsubscribed, true);
+  assert.equal(l.next_follow_up_at, null);
+  await runFollowUps(w.cid);
+  assert.equal(S.mailer.sent.filter((m) => m.to === w.lead.email).length, 0, "nothing more is sent to the original lead address");
+});
+
 test("reply STOP still unsubscribes and confirms when the AI classifier hangs (opt-out never waits on Gemini)", async () => {
   const w = world();
   S.ai.classifyHangs = true;
