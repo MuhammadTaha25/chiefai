@@ -32,3 +32,22 @@ test("a correct catch-all passes, and stale extra catch-alls are counted", () =>
   const stale = { expression: "catch_all()", actions: ['forward("https://old.example/x")'] };
   assert.deepEqual(inboundRouteStatus([good, stale], URL_OK), { ok: true, staleCatchAlls: 1 });
 });
+
+import { buildPlatformAlert } from "../src/lib/platform-alert-core.ts";
+
+test("alert: nothing wrong -> no mail", () => {
+  assert.equal(buildPlatformAlert({ sendingBroken: 0, errors: 0, platform: { duplicateMailboxes: [], inboundRoute: { ok: true }, needsAttention: false } }), null);
+  assert.equal(buildPlatformAlert({ sendingBroken: 0, errors: 0 }), null);
+});
+
+test("alert: broken DNS, duplicate mailbox and bad inbound route each appear", () => {
+  const a = buildPlatformAlert({
+    sendingBroken: 1,
+    errors: 0,
+    platform: { duplicateMailboxes: [{ address: "sales@x.com", clients: 2, rows: 2 }], inboundRoute: { ok: false, problem: "wrong_url" }, needsAttention: true },
+  });
+  assert.ok(a);
+  assert.match(a.text, /cannot send/);
+  assert.match(a.text, /sales@x\.com/);
+  assert.match(a.text, /wrong_url/);
+});
