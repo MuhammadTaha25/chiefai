@@ -3,6 +3,8 @@ import StatCard from "@/components/stat-card";
 import AskCompany from "@/components/ask-company";
 import OutreachPipeline from "@/components/outreach-pipeline";
 import { getOutreachStatus } from "@/lib/outreach-status";
+import { getSendingHealth } from "@/lib/sending-health";
+import SendingHealthCard from "@/components/sending-health-card";
 import { formatLocalDateTime } from "@/lib/format-date";
 
 interface AdFinanceDecisionRow {
@@ -76,6 +78,7 @@ export default async function DashboardPage() {
     : { data: null };
 
   const outreachStatus = currentClientRow ? await getOutreachStatus(supabase, currentClientRow.id) : null;
+  const sendingHealth = currentClientRow ? await getSendingHealth(supabase, currentClientRow.id) : null;
 
   const now = new Date();
   const weekStart = startOfUtcWeek(now).toISOString();
@@ -155,6 +158,8 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-8">
       <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+
+      {sendingHealth && <SendingHealthCard health={sendingHealth} />}
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatCard label="Leads this week" value={leadsThisWeek} />
