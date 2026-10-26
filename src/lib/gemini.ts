@@ -355,7 +355,35 @@ Plain text only, no markdown. ${SPAM_SAFE_RULES}
 
 Respond with ONLY valid JSON matching exactly: {"subject": string, "body": string}`;
 
-  return generateJson<AidaEmail>(prompt);
+  const email = await generateJson<AidaEmail>(prompt);
+  if (params.sentiment === "LATER" && email?.body) {
+    email.body = stripQuestions(email.body);
+  }
+  return email;
+}
+
+const QUESTION_START = /^(does|do|is|are|was|were|will|would|can|could|should|shall|may|might|have|has|did|how|what|when|where|why|who|which)\b/i;
+
+/**
+ * A "not now" acknowledgement must never ask anything. The model sometimes
+ * ignores that rule (and may even drop the "?"), so remove any sentence that
+ * is a question, either by its "?" or by starting like one.
+ */
+export function stripQuestions(body: string): string {
+  const lines = body.split("\n").map((line) => {
+    const sentences = line.match(/[^.!?]+[.!?]*/g) ?? [line];
+    return sentences
+      .filter((sn) => {
+        const t = sn.trim();
+        if (!t) return false;
+        if (t.includes("?")) return false;
+        return !QUESTION_START.test(t.replace(/^[^A-Za-z]+/, ""));
+      })
+      .map((sn) => sn.trim())
+      .join(" ");
+  });
+  // Collapse blank-line runs left behind by a removed line.
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 /**
