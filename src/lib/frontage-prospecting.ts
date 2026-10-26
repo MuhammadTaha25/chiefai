@@ -279,8 +279,10 @@ export async function runPlans(
           offset: baseOffset + page * pageSize,
         });
         const rows = (payload.leads as FrontageRow[] | undefined) ?? [];
+        const scannedBefore = rowsScanned;
         rowsScanned += rows.length;
-        for (const r of rows) {
+        for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+          const r = rows[rowIndex];
           // Defense in depth, regardless of how this row was found (exact city param, category, or a
           // free-text keyword search): a requested city must match the row's OWN city field exactly, not
           // just appear somewhere in its name. "Tony O'Brien - Los Angeles Realtor" (actually Beverly
@@ -297,7 +299,13 @@ export async function runPlans(
           seen.add(email);
           const name = (r.name ?? "").trim();
           out.push({ name, email, company: name, jobTitle: null, industry: humanizeIndustry(r.category) ?? humanizeIndustry((filter as { category?: string; search?: string }).category ?? (filter as { search?: string }).search) });
-          if (out.length >= limit) break outer;
+          if (out.length >= limit) {
+            // Stopped early because the quota is met: the search is NOT exhausted, and the next run must resume right
+            // after the last row used here (not after the whole page, which would skip the unread rows).
+            rowsScanned = scannedBefore + rowIndex + 1;
+            allFiltersExhausted = false;
+            break outer;
+          }
         }
         if (rows.length < pageSize) {
           filterExhausted = true;

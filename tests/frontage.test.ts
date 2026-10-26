@@ -211,3 +211,30 @@ test("nothing close -> keyword fallback, never a wrong category", async () => {
   assert.ok(searched.every((a) => a.category === undefined));
   assert.ok(searched.some((a) => a.search === "submarine repair"));
 });
+
+import { runPlans } from "../src/lib/frontage-prospecting.ts";
+
+test("repeat search resumes after the rows it used instead of restarting at 0", async () => {
+  const rows = Array.from({ length: 573 }, (_, i) => ({ name: `D${i}`, email: `d${i}@x.com`, city: "Houston", category: "dentist" }));
+  const call = async (_t: string, a: Record<string, unknown>) => ({ leads: rows.slice(a.offset as number, (a.offset as number) + (a.limit as number)) });
+  const plans = [{ country: "US", city: "Houston", filters: [{ category: "dentist" }, { search: "dentists" }, {}] }];
+  let cursor = 0;
+  const seen: string[] = [];
+  for (let run = 0; run < 4; run++) {
+    const r = await runPlans(plans, 4, call, cursor);
+    assert.equal(r.prospects.length, 4);
+    assert.equal(r.exhausted, false);
+    for (const p of r.prospects) seen.push(p.name);
+    cursor += r.rowsScanned;
+  }
+  // 16 different leads in 4 runs, none skipped and none repeated, in order.
+  assert.deepEqual(seen, Array.from({ length: 16 }, (_, i) => `D${i}`));
+});
+
+test("a search that really runs out of rows is reported as exhausted", async () => {
+  const rows = [{ name: "A", email: "a@x.com", city: "Houston" }];
+  const call = async (_t: string, a: Record<string, unknown>) => ({ leads: rows.slice(a.offset as number, (a.offset as number) + (a.limit as number)) });
+  const r = await runPlans([{ country: "US", city: "Houston", filters: [{}] }], 4, call, 0);
+  assert.equal(r.prospects.length, 1);
+  assert.equal(r.exhausted, true);
+});
