@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   conversionCap,
+  painPointList,
   entryKey,
   mergeWeek,
   parseWeekEntries,
@@ -19,6 +20,7 @@ const ctx: BusinessContext = {
   primaryGoal: "lead_generation",
   targetAudience: ["home sellers", "first-time buyers"],
   services: "residential sales",
+  painPoints: "Missed showing calls; slow replies to buyers; manual paperwork. Unanswered listing questions.",
   products: [{ name: "Home valuation" }, { name: "Buyer consultation" }, { name: "Staging advice" }],
 };
 
@@ -118,4 +120,39 @@ test("parseWeekEntries drops malformed rows instead of throwing", () => {
 
 test("the recommended plan constant still exists (guards the import used elsewhere)", () => {
   assert.ok(RECOMMENDED_PLAN.days.length > 0);
+});
+
+test("pain points: the business's list is split into single problems", () => {
+  assert.deepEqual(painPointList("Too many repetitive customer questions; missed calls; slow lead follow-up; manual repetitive work."), [
+    "Too many repetitive customer questions",
+    "missed calls",
+    "slow lead follow-up",
+    "manual repetitive work",
+  ]);
+  assert.deepEqual(painPointList(undefined), []);
+});
+
+test("skeleton: every post gets a problem, and neighbouring posts never share one", () => {
+  const sk = planWeekSkeleton(ctx, [], week);
+  assert.ok(sk.every((s) => s.painPoint));
+  for (let i = 1; i < sk.length; i++) assert.notEqual(sk[i].painPoint, sk[i - 1].painPoint);
+  assert.ok(new Set(sk.map((s) => s.painPoint)).size >= 4, "all four problems are used");
+});
+
+test("validation rejects a stock-photo visual, but accepts the same props when something is happening", () => {
+  const sk = planWeekSkeleton(ctx, [], week);
+  const base = good(sk);
+  const stock = base.map((d, i) => (i === 1 ? { ...d, visualIdea: "An agency manager sitting at a desk with a laptop and a coffee" } : d));
+  assert.match(validateWeekDrafts(sk, stock, [])!, /stock-photo/);
+  const happening = base.map((d, i) => (i === 1 ? { ...d, visualIdea: "An agent at a desk with a laptop while the phone beside it keeps ringing unanswered" } : d));
+  assert.equal(validateWeekDrafts(sk, happening, []), null);
+});
+
+test("validation rejects a hook that introduces the company or uses a tool name", () => {
+  const sk = planWeekSkeleton(ctx, [], week);
+  const base = good(sk);
+  const company = base.map((d, i) => (i === 3 ? { ...d, hook: "We build done-for-you automations that save hours" } : d));
+  assert.match(validateWeekDrafts(sk, company, [])!, /introduces the company/);
+  const jargon = base.map((d, i) => (i === 5 ? { ...d, hook: "Connect your tools with custom n8n flows built for you" } : d));
+  assert.match(validateWeekDrafts(sk, jargon, [])!, /jargon/);
 });

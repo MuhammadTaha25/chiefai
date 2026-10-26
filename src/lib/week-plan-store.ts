@@ -52,6 +52,7 @@ export async function ensureWeekPlan(
           pillarBrief: PILLAR_BRIEF[s.pillar],
           productName: s.productName,
           audience: s.audience,
+          painPoint: s.painPoint,
         })),
         rejectedBecause,
       });

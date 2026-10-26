@@ -118,7 +118,7 @@ export interface WeekIdeaRequest {
   businessContext: string;
   historyBlock: string;
   /** Per planned post, already decided by code. */
-  entries: { key: string; dayName: string; format: "image" | "carousel" | "video"; pillar: string; pillarBrief: string; productName?: string; audience?: string }[];
+  entries: { key: string; dayName: string; format: "image" | "carousel" | "video"; pillar: string; pillarBrief: string; productName?: string; audience?: string; painPoint?: string }[];
   /** Why the previous attempt was not accepted. */
   rejectedBecause?: string;
 }
@@ -132,7 +132,7 @@ export async function planWeekIdeas(params: WeekIdeaRequest): Promise<{ key: str
   const list = params.entries
     .map(
       (e) =>
-        `- key "${e.key}" (${e.dayName}, ${e.format}): pillar ${e.pillar} — ${e.pillarBrief}${e.productName ? ` | focus: ${e.productName}` : ""}${e.audience ? ` | audience: ${e.audience}` : ""}`,
+        `- key "${e.key}" (${e.dayName}, ${e.format}): pillar ${e.pillar} — ${e.pillarBrief}${e.productName ? ` | focus: ${e.productName}` : ""}${e.audience ? ` | audience: ${e.audience}` : ""}${e.painPoint ? ` | the customer problem this post is about: ${e.painPoint}` : ""}`,
     )
     .join("\n");
   const prompt = `${params.businessContext ? params.businessContext + "\n\n" : ""}${params.historyBlock ? params.historyBlock + "\n\n" : ""}You are ${params.companyName}'s social media strategist. Plan this week's feed posts as ONE set, so they are clearly different from each other and from the recent posts above.
@@ -142,8 +142,9 @@ ${list}
 
 For every post write:
 - topic: a specific, concrete title a customer would stop for. NOT an abstract theme ("The impact of X on productivity"). Name a real situation, problem or question from this business's own world.
-- hook: the first line of the post, under 18 words. Specific beats vague. Pair something the reader recognises about themselves with a real curiosity gap. Honest: the post must deliver what the hook promises. Use no invented numbers, results or claims. Vary the openings across the week (do not start two hooks with the same words).
-- visualIdea: ONE sentence saying exactly what the picture or video SHOWS: a concrete person, place or object doing one thing in one setting (e.g. "A shop owner glancing at a phone that keeps ringing while both hands are busy with a customer"). It must be something a camera can film; never an idea, a chart or a concept. For a video it must be a single scene with ONE subject, ONE action and ONE setting, no text on screen. Do not show real brand logos or identifiable real people.
+- hook: the first line of the post, under 18 words, written to the reader about THEIR situation ("you", their day, their problem). Specific beats vague. Pair something the reader recognises about themselves with a real curiosity gap. Honest: the post must deliver what the hook promises. Use no invented numbers, results or claims. NEVER start a hook with "We" or "Our" and never introduce the company in the hook (for a trust post, the hook is about what the reader gets or what changes for them, and the proof goes in the caption). No tool or technology names (n8n, RAG, API ...): say what it does for the customer. Vary the openings across the week (do not start two hooks with the same words).
+- visualIdea: ONE sentence saying exactly what the picture or video SHOWS. It must show the PROBLEM or the OUTCOME the hook talks about, as a moment where something is visibly happening to a concrete person in one setting (e.g. "A shop owner holding a customer's bag with both hands while the phone on the counter lights up with a missed call"). It must NOT be a generic stock scene of a person at a desk, laptop, coffee, calendar or office; if the hook is about calls, show calls; if about messages, show a pile of unanswered messages; if about hours lost, show the late hour and the work still waiting. It must be something a camera can film; never an idea, a chart or a concept. For a video it must be a single scene with ONE subject, ONE action and ONE setting, no text on screen. Do not show real brand logos or identifiable real people.
+- Posts that share a pillar must still be about different customer problems; follow the customer problem given for each post.
 
 Only use facts found in the business context. No invented offers, prices, results, awards or testimonials. No fake urgency.${params.rejectedBecause ? `\n\nIMPORTANT: your previous plan was not accepted because ${params.rejectedBecause}. Fix that.` : ""}
 
