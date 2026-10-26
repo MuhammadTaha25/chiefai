@@ -305,17 +305,18 @@ test("any real reply stops the follow-up sequence", async () => {
 });
 
 // ===================================================================== "not now" / "not interested" / angry
-test("'not now, maybe later' keeps the lead in its follow-up sequence and sends nothing now", async () => {
+test("'not now, maybe later' keeps the lead in its follow-up sequence and gets one short 'we'll be in touch' note", async () => {
   const w = world();
   const due = S.leadRow(id(w.lead)).next_follow_up_at;
   S.ai.classification = "LATER";
-  const r = await reply(w, "Not right now, maybe in a few months");
-  assert.equal(r.json.kept_in_sequence, true);
+  await reply(w, "Not right now, maybe in a few months");
   const l = S.leadRow(id(w.lead));
   assert.equal(l.reply_classification, "LATER");
   assert.equal(l.reply_received, false, "still counts as a lead in sequence");
   assert.equal(l.next_follow_up_at, due, "follow-up schedule untouched");
-  assert.equal(S.mailer.sent.length, 0, "no automatic reply");
+  assert.equal(S.mailer.sent.length, 1, "one short acknowledgement");
+  assert.equal(S.ai.replyCalls.at(-1)!.sentiment, "LATER");
+  assert.equal(S.leadRow(id(w.lead)).next_follow_up_at, due, "and the follow-up is still scheduled");
 });
 
 test("a polite 'not interested' gets exactly ONE retention attempt, then the sequence ends", async () => {
