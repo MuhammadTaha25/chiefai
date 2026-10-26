@@ -426,39 +426,31 @@ export async function POST(req: NextRequest) {
           }).catch(() => null)
         : null;
 
-    // "Not now, maybe later" is a request for time, not a refusal: record what they said but leave the lead in its
-    // follow-up sequence (reply_received stays false, next_follow_up_at and status are untouched) and send nothing now.
-    if (classification === "LATER") {
-      const { error: laterError } = await admin
-        .from("leads")
-        .update({ reply_classification: classification, reply_confidence: confidence, reply_reason: reason })
-        .eq("id", lead.id);
-      if (laterError) {
-        // eslint-disable-next-line no-console
-        console.error(`Failed to record LATER reply on lead ${lead.id}:`, laterError.message);
-      }
-      await storeInbound(mailbox.id, classification);
-      return NextResponse.json({ ok: true, classification, confidence, kept_in_sequence: true });
-    }
-
+    // "Not now, maybe later" is a request for time, not a refusal: record what they said and send a short
+    // "we'll be in touch" note, but leave the lead in its follow-up sequence (reply_received stays false, next_follow_up_at
+    // and status are untouched). The scheduled follow-up IS the "later" contact.
+    const isLater = classification === "LATER";
     const { error: leadUpdateError } = await admin
       .from("leads")
-      .update({
-        reply_received: true,
-        sentiment: SENTIMENT_COLUMN_VALUE[classification],
-        status: STATUS_FOR_CLASSIFICATION[classification],
-        reply_classification: classification,
-        reply_confidence: confidence,
-        reply_reason: reason,
-        // A reply of any classification stops the automated follow-up
-        // sequence (spec §19, §33) — BOOKING/HAPPY/ANGRY/UNCLEAR all clear
-        // it; UNCLEAR must NOT restart it either (§18).
-        next_follow_up_at: null,
-        ...(meetingTopic ? { meeting_topic: meetingTopic } : {}),
-        ...(classification === "ANGRY" || classification === "NOT_INTERESTED"
-          ? { tone_recovery_attempts: (lead.tone_recovery_attempts ?? 0) + 1 }
-          : {}),
-      })
+      .update(
+        isLater
+          ? { reply_classification: classification, reply_confidence: confidence, reply_reason: reason }
+          : {
+              reply_received: true,
+              sentiment: SENTIMENT_COLUMN_VALUE[classification],
+              status: STATUS_FOR_CLASSIFICATION[classification],
+              reply_classification: classification,
+              reply_confidence: confidence,
+              reply_reason: reason,
+              // A reply of any other classification stops the automated follow-up sequence (spec §19, §33);
+              // UNCLEAR must NOT restart it either (§18).
+              next_follow_up_at: null,
+              ...(meetingTopic ? { meeting_topic: meetingTopic } : {}),
+              ...(classification === "ANGRY" || classification === "NOT_INTERESTED"
+                ? { tone_recovery_attempts: (lead.tone_recovery_attempts ?? 0) + 1 }
+                : {}),
+            }
+      )
       .eq("id", lead.id);
 
     // A silent DB write failure here (e.g. a check-constraint violation) is
@@ -468,7 +460,7 @@ export async function POST(req: NextRequest) {
       // eslint-disable-next-line no-console
       console.error(`Failed to update lead ${lead.id} after reply:`, leadUpdateError.message);
     } else {
-      await incrementCampaignReplyCount(admin, lead.campaign_id);
+      if (!isLater) await incrementCampaignReplyCount(admin, lead.campaign_id);
     }
 
     await storeInbound(mailbox.id, classification);

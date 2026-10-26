@@ -324,7 +324,7 @@ export async function draftReplyEmail(params: {
     NOT_INTERESTED:
       "The recipient politely said no. Make ONE respectful retention attempt, written differently from the earlier emails. Start by thanking them for answering. Then, in plain words, make a gentle timing point: businesses like theirs that sort out this everyday problem sooner tend to be the ones customers reach first, so waiting has a cost — frame it as timing, never as a guarantee, never name or imply a specific competitor, and no numbers, percentages or invented results. Offer ONE very small next step (a short reply with a yes/no or a ten-minute look), using ONLY what the business context says we do. End by saying that if the answer is still no, you will not write again. No link. Under 80 words.",
     LATER:
-      "The recipient asked for more time. (No reply is normally sent for this case.) Write a one-line acknowledgement: thanks, no pressure, you will check back later. Under 30 words.",
+      "The recipient said not now / maybe later. Write a short, warm reply (under 40 words): thank them, say there is no pressure, and that you will be in touch again soon. Do NOT name a date or a time frame, do NOT pitch, no link, no question.",
     BOOKING:
       calendlyUrl
         ? `The recipient wants to schedule a call. Write an enthusiastic, brief reply confirming and giving them this booking link: ${calendlyUrl}. Under 60 words.`
