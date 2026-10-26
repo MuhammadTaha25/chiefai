@@ -14,6 +14,7 @@ import {
   type HistoryItem,
 } from "@/lib/content-strategy";
 import { planStrategicContent, type StrategicContentDraft } from "@/lib/social-ai";
+import type { WeekEntry } from "@/lib/week-plan";
 import { validateOutbound } from "@/lib/brand-guard";
 import {
   createZernioPost,
@@ -100,12 +101,25 @@ export async function createStrategicItem(params: {
   forcePillar?: ContentPillar;
   /** A Story that supports an existing feed post keeps its pillar/product and teases its topic. */
   supports?: HistoryItem & { topic: string; hook: string; caption: string };
+  /** This post's entry in the week plan: title, hook and visual idea are already decided; pillar/product/CTA come from it. */
+  planned?: WeekEntry;
 }): Promise<StrategicItem> {
-  const { ctx, history, format, supports, forcePillar } = params;
+  const { ctx, history, format, supports, forcePillar, planned } = params;
 
   let plan = planNextContent(ctx, history, format);
   if (forcePillar) {
     plan = { ...plan, pillar: forcePillar, objective: PILLAR_OBJECTIVE[forcePillar], ctaIntent: PILLAR_CTA[forcePillar], cta: resolveCta(ctx, PILLAR_CTA[forcePillar], format) };
+  }
+  if (planned) {
+    plan = {
+      ...plan,
+      pillar: planned.pillar,
+      objective: PILLAR_OBJECTIVE[planned.pillar],
+      ctaIntent: PILLAR_CTA[planned.pillar],
+      productName: planned.productName,
+      audience: planned.audience,
+      cta: planned.cta,
+    };
   }
   if (supports?.content_pillar && supports.content_pillar in PILLAR_OBJECTIVE) {
     const pillar = supports.content_pillar as ContentPillar;
@@ -140,6 +154,7 @@ export async function createStrategicItem(params: {
       historyBlock,
       supports: supports ? { topic: supports.topic, hook: supports.hook, caption: supports.caption } : undefined,
       rejectedBecause,
+      planned: planned ? { topic: planned.topic, hook: planned.hook, visualIdea: planned.visualIdea } : undefined,
       ownerPillars: ctx.contentPillars,
       // Brand visual identity — injected explicitly so image and caption generation
       // uses the business's actual colors, style and tone rather than generic output.
@@ -154,7 +169,8 @@ export async function createStrategicItem(params: {
       continue;
     }
     // A story is SUPPOSED to echo its feed post's topic, so only feed content is history-checked.
-    const repeat = supports ? null : repeatsHistory(draft, history);
+    // A planned post's topic and hook were already checked against history when the week was planned.
+    const repeat = supports ? null : planned ? repeatsHistory({ caption: draft.caption }, history) : repeatsHistory(draft, history);
     if (repeat) {
       rejectedBecause = repeat;
       continue;
