@@ -39,32 +39,51 @@ export interface SendingHealth {
 
 const CHECK_LABEL: Record<string, string> = { spf: "SPF", dkim: "DKIM", dmarc: "DMARC", mx: "MX", tracking: "Tracking" };
 
-export function domainProblems(domains: DomainHealthRow[]): string[] {
-  const out: string[] = [];
+/**
+ * Splits domain trouble in two. "blocking" = this domain cannot send now and it matters (an active domain whose DNS
+ * check fails, a domain missing in Mailgun, or NO domain is active at all). "notReady" = an extra domain that is
+ * still pending/provisioning while another domain is active and sending: worth a note, not an alarm.
+ */
+export function domainIssues(domains: DomainHealthRow[]): { blocking: string[]; notReady: string[] } {
+  const blocking: string[] = [];
+  const notReady: string[] = [];
+  const anyActive = domains.some((d) => d.dns_status === "active");
   for (const d of domains) {
     if (d.dns_health?.problem === "not_in_mailgun") {
-      out.push(`${d.domain} is not set up in Mailgun, so it cannot send. Reconnect or re-provision it in Settings.`);
+      blocking.push(`${d.domain} is not set up in Mailgun, so it cannot send. Reconnect or re-provision it in Settings.`);
       continue;
     }
     if (d.dns_status && d.dns_status !== "active") {
-      out.push(`${d.domain} is not active yet (status: ${d.dns_status}).`);
+      const line = `${d.domain} is not active yet (status: ${d.dns_status}). Open Settings > Domains to finish it.`;
+      (anyActive ? notReady : blocking).push(line);
       continue;
     }
     const failing = (d.dns_health?.checks ?? []).filter((c) => c.status !== "ok");
     if (failing.length > 0) {
       const names = failing.map((c) => CHECK_LABEL[c.kind.toLowerCase()] ?? c.kind.toUpperCase()).join(", ");
-      out.push(`${d.domain}: DNS check failed for ${names}. Open Settings > Domains to see what to fix.`);
+      blocking.push(`${d.domain}: DNS check failed for ${names}. Open Settings > Domains to see what to fix.`);
     }
   }
-  return out;
+  return { blocking, notReady };
 }
 
 export function buildSendingHealth(i: SendingHealthInput): SendingHealth {
+  const base = buildCore(i);
+  const { notReady } = domainIssues(i.domains);
+  if (base.level === "bad" || notReady.length === 0) return base;
+  return {
+    level: "warn",
+    headline: base.level === "ok" ? `${base.headline} One extra domain is not ready yet.` : base.headline,
+    details: [...base.details, ...notReady],
+  };
+}
+
+function buildCore(i: SendingHealthInput): SendingHealth {
   const broken: string[] = [];
   if (!i.timezoneValid) broken.push("Your timezone is not set. Choose it in Settings > Sending schedule, otherwise nothing is sent.");
   else if (isSendWindowBroken(i.windowStart, i.windowEnd)) broken.push("Your sending window is invalid (it must be between 5 minutes and 24 hours). Fix it in Settings > Sending schedule, otherwise nothing is sent.");
   if (i.mailboxes.length === 0) broken.push("You have no mailbox yet, so nothing can be sent.");
-  broken.push(...domainProblems(i.domains));
+  broken.push(...domainIssues(i.domains).blocking);
   if (broken.length > 0) {
     return { level: "bad", headline: "Sending needs your attention", details: broken };
   }

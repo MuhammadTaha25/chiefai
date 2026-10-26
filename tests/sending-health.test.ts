@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildSendingHealth, domainProblems, type SendingHealthInput } from "../src/lib/sending-health-core.ts";
+import { buildSendingHealth, domainIssues, type SendingHealthInput } from "../src/lib/sending-health-core.ts";
 
 const base: SendingHealthInput = {
   campaignActive: true,
@@ -32,16 +32,33 @@ test("no mailbox is bad", () => {
   assert.equal(buildSendingHealth({ ...base, mailboxes: [] }).level, "bad");
 });
 
-test("failing DNS check and not-in-mailgun are reported per domain", () => {
-  const p = domainProblems([
+test("failing DNS check and not-in-mailgun are blocking per domain", () => {
+  const p = domainIssues([
     { domain: "a.test", dns_status: "active", dns_health: { checks: [{ kind: "dkim", status: "missing" }, { kind: "spf", status: "ok" }] } },
     { domain: "b.test", dns_status: "active", dns_health: { problem: "not_in_mailgun", checks: [] } },
-    { domain: "c.test", dns_status: "provisioning_failed" },
-  ]);
-  assert.equal(p.length, 3);
+  ]).blocking;
+  assert.equal(p.length, 2);
   assert.match(p[0], /a\.test.*DKIM/);
   assert.match(p[1], /Mailgun/);
-  assert.match(p[2], /c\.test.*provisioning_failed/);
+});
+
+test("a pending extra domain next to an active one is a note, not an alarm", () => {
+  const h = buildSendingHealth({
+    ...base,
+    nowMinute: 8 * 60 + 5, sentToday: 0, sentTodayByMailbox: {},
+    domains: [
+      { domain: "d.test", dns_status: "active", dns_health: { checks: [{ kind: "spf", status: "ok" }] } },
+      { domain: "x.test", dns_status: "pending" },
+    ],
+  });
+  assert.equal(h.level, "warn");
+  assert.match(h.headline, /Sending is working/);
+  assert.match(h.details.join(" "), /x\.test.*pending/);
+});
+
+test("when NO domain is active a pending domain is blocking", () => {
+  const h = buildSendingHealth({ ...base, domains: [{ domain: "x.test", dns_status: "pending" }] });
+  assert.equal(h.level, "bad");
 });
 
 test("no active campaign is a warning, not an error", () => {
@@ -74,6 +91,6 @@ test("inside a block with no leads says nothing is waiting", () => {
 });
 
 test("a problem is never hidden behind a friendly wait message", () => {
-  const h = buildSendingHealth({ ...base, nowMinute: 14 * 60, domains: [{ domain: "x.test", dns_status: "provisioning_failed" }] });
+  const h = buildSendingHealth({ ...base, nowMinute: 14 * 60, domains: [{ domain: "x.test", dns_status: "active", dns_health: { problem: "not_in_mailgun", checks: [] } }] });
   assert.equal(h.level, "bad");
 });
