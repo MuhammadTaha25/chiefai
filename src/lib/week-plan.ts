@@ -30,6 +30,8 @@ export interface WeekSkeletonEntry {
   pillar: ContentPillar;
   productName?: string;
   audience?: string;
+  /** The one customer problem this post is about; different for every post of the week as far as the list allows. */
+  painPoint?: string;
   cta: string;
 }
 
@@ -68,6 +70,14 @@ export function weeksToPlan(clock: { date: string; weekday: number; minutes: num
   return weeks;
 }
 
+/** The business's own list of customer problems, split into single problems ("a; b; c." → ["a","b","c"]). */
+export function painPointList(painPoints: string | undefined): string[] {
+  return (painPoints ?? "")
+    .split(/[;\n]+|\.\s+/)
+    .map((p) => p.trim().replace(/\.$/, "").trim())
+    .filter((p) => p.length > 2);
+}
+
 const ORDER: ContentPillar[] = ["educational", "problem_awareness", "solution", "trust", "engagement", "conversion"];
 
 /** About one post in four may be an offer (conversion); never fewer than one for a week of three or more posts. */
@@ -86,6 +96,9 @@ export function planWeekSkeleton(ctx: BusinessContext, history: HistoryItem[], i
   const weights = pillarWeights(ctx);
   const cap = conversionCap(posts.length);
   const audiences = ctx.targetAudience ?? [];
+  const problems = painPointList(ctx.painPoints);
+  // Start the rotation where the last plan could have ended, so consecutive weeks do not open with the same problem.
+  const problemOffset = history.length % Math.max(1, problems.length);
   const picked: HistoryItem[] = []; // newest first, like `history`
   const out: WeekSkeletonEntry[] = [];
 
@@ -120,6 +133,7 @@ export function planWeekSkeleton(ctx: BusinessContext, history: HistoryItem[], i
       pillar: best,
       productName,
       audience: audiences.length ? audiences[(history.length + i) % audiences.length] : undefined,
+      painPoint: problems.length ? problems[(problemOffset + i) % problems.length] : undefined,
       cta: resolveCta(ctx, PILLAR_CTA[best], format),
     });
     picked.unshift({ content_pillar: best, product_name: productName ?? null, topic: null, hook: null });
@@ -129,6 +143,13 @@ export function planWeekSkeleton(ctx: BusinessContext, history: HistoryItem[], i
 
 const words = (s: string) => s.trim().split(/\s+/).filter(Boolean);
 // A visual idea has to be something a camera or a picture can show. These words name an idea, not a scene.
+// Stock-photo scenes: a person at a desk with a laptop and coffee shows nothing about the post. Allowed only when
+// something is visibly HAPPENING (a ringing phone, a pile of messages ...).
+const STOCK_PROPS = /\b(desk|laptop|coffee|workspace|tablet|modern office|glass window|calendar|notebook)\b/i;
+const HAPPENING = /\b(ring(s|ing)?|buzz(es|ing)?|missed|unanswered|pil(e|es|ing)|stack(s|ed)?|overflow(s|ing)?|notifications?|waiting|queue|messages?|blink(s|ing)?|flash(es|ing)?|flood(s|ed|ing)?|crowd(s|ed)?|lights up|unread|inbox|timer|clock)\b/i;
+// A hook speaks to the reader's own situation. A company introduction or a tool name is not a hook.
+const COMPANY_HOOK = /^(we|our|at [a-z0-9 ]+, we)\b/i;
+const JARGON = /\b(n8n|rag|api|llm|saas|crm|workflow automation platform|webhook)\b/i;
 const ABSTRACT_VISUAL = /\b(concept|the impact of|the importance of|the idea of|the power of|productivity|synergy|digital transformation|bottleneck|workflow optimi[sz]ation)\b/i;
 
 /**
@@ -146,6 +167,9 @@ export function validateWeekDrafts(skeleton: WeekSkeletonEntry[], drafts: WeekId
     if (words(d.visualIdea).length < 6) return `the visual idea for ${s.key} was too short to be a real scene`;
     if (ABSTRACT_VISUAL.test(d.visualIdea)) return `the visual idea for ${s.key} describes an idea, not something that can be seen`;
     if (words(d.hook).length > 22) return `the hook for ${s.key} was too long`;
+    if (COMPANY_HOOK.test(d.hook.trim())) return `the hook for ${s.key} introduces the company instead of speaking to the reader's situation`;
+    if (JARGON.test(d.hook)) return `the hook for ${s.key} uses technical jargon a customer would not use`;
+    if (STOCK_PROPS.test(d.visualIdea) && !HAPPENING.test(d.visualIdea)) return `the visual idea for ${s.key} is a stock-photo scene (a person at a desk or laptop) where nothing is happening`;
     const repeat = repeatsHistory({ topic: d.topic, hook: d.hook }, history);
     if (repeat) return `entry ${s.key}: ${repeat}`;
     for (const o of seen) {
