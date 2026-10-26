@@ -304,6 +304,64 @@ test("any real reply stops the follow-up sequence", async () => {
   assert.equal(l.reply_classification, "UNCLEAR");
 });
 
+// ===================================================================== "not now" / "not interested" / angry
+test("'not now, maybe later' keeps the lead in its follow-up sequence and sends nothing now", async () => {
+  const w = world();
+  const due = S.leadRow(id(w.lead)).next_follow_up_at;
+  S.ai.classification = "LATER";
+  const r = await reply(w, "Not right now, maybe in a few months");
+  assert.equal(r.json.kept_in_sequence, true);
+  const l = S.leadRow(id(w.lead));
+  assert.equal(l.reply_classification, "LATER");
+  assert.equal(l.reply_received, false, "still counts as a lead in sequence");
+  assert.equal(l.next_follow_up_at, due, "follow-up schedule untouched");
+  assert.equal(S.mailer.sent.length, 0, "no automatic reply");
+});
+
+test("a polite 'not interested' gets exactly ONE retention attempt, then the sequence ends", async () => {
+  const w = world();
+  S.ai.classification = "NOT_INTERESTED";
+  await reply(w, "Thanks, but we're not interested");
+  const l = S.leadRow(id(w.lead));
+  assert.equal(l.reply_classification, "NOT_INTERESTED");
+  assert.equal(l.next_follow_up_at, null, "no more automatic follow-ups");
+  assert.equal(l.tone_recovery_attempts, 1);
+  assert.equal(S.mailer.sent.length, 1, "the one retention email");
+  assert.equal(S.ai.replyCalls.at(-1)!.sentiment, "NOT_INTERESTED");
+  assert.equal(l.unsubscribed, false);
+});
+
+test("a second 'not interested' gets a human, not another retention email", async () => {
+  const w = world();
+  S.ai.classification = "NOT_INTERESTED";
+  await reply(w, "Not interested");
+  await reply(w, "I said no thanks");
+  assert.equal(S.mailer.sent.length, 1, "only the first attempt was sent");
+});
+
+test("'not interested' that includes STOP wording is a plain unsubscribe, no retention email", async () => {
+  const w = world();
+  S.ai.classification = "NOT_INTERESTED";
+  const r = await reply(w, "Not interested, please stop emailing me");
+  assert.equal(r.json.unsubscribed, true);
+  assert.equal(S.mailer.sent.length, 1, "only the confirmation");
+  assert.doesNotMatch(S.mailer.sent[0].text, /timing|waiting has a cost/i);
+});
+
+test("an annoyed reply gets one changed-approach answer, a second annoyed reply gets a human", async () => {
+  const w = world();
+  S.ai.classification = "ANGRY";
+  await reply(w, "This is nonsense, stop wasting my time");
+  assert.equal(S.leadRow(id(w.lead)).unsubscribed, true, "contains 'stop' wording, handled as an opt-out");
+  S.resetWorld();
+  const w2 = world();
+  S.ai.classification = "ANGRY";
+  await reply(w2, "This is nonsense, why are you bothering me");
+  assert.equal(S.mailer.sent.length, 1);
+  await reply(w2, "Seriously, enough");
+  assert.equal(S.mailer.sent.length, 1, "second angry reply: human takeover");
+});
+
 test("an interested reply (BOOKING) always gets the booking link, even if the AI forgot it, from the mailbox that was written to", async () => {
   const w = world({ calendly: true });
   S.ai.classification = "BOOKING";
