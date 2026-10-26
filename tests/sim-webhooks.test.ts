@@ -363,6 +363,18 @@ test("an annoyed reply gets one changed-approach answer, a second annoyed reply 
   assert.equal(S.mailer.sent.length, 1, "second angry reply: human takeover");
 });
 
+test("replies and the STOP confirmation carry the business name next to the mailbox address, like first emails", async () => {
+  const w = world();
+  S.ai.classification = "HAPPY";
+  await reply(w, "Sounds good, tell me more");
+  assert.match(S.mailer.sent[0].from, /^[^<]+ <[^>]+@[^>]+>$/, "Name <address>");
+  assert.ok(S.mailer.sent[0].from.includes(String(w.mb.address)));
+  S.resetWorld();
+  const w2 = world();
+  await reply(w2, "STOP");
+  assert.match(S.mailer.sent[0].from, /^[^<]+ <[^>]+@[^>]+>$/, "confirmation too");
+});
+
 test("an interested reply (BOOKING) always gets the booking link, even if the AI forgot it, from the mailbox that was written to", async () => {
   const w = world({ calendly: true });
   S.ai.classification = "BOOKING";

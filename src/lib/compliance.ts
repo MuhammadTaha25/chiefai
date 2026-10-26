@@ -82,3 +82,9 @@ export function withUnsubscribeFooter(body: string, opts: { company: string | nu
 export function unsubscribeHeaders(replyAddress: string): Record<string, string> {
   return { "List-Unsubscribe": `<mailto:${replyAddress}?subject=unsubscribe>` };
 }
+
+/** "Acme Co <sales@acme.com>": the business name next to the address, as the first email and follow-ups already do. */
+export function fromWithDisplayName(company: string | null | undefined, address: string): string {
+  const name = (company ?? "").replace(/["<>\r\n]/g, "").trim() || "Team";
+  return `${name} <${address}>`;
+}
