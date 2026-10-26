@@ -243,7 +243,7 @@ Respond with ONLY valid JSON: {"offer": string, "benefit": string}`;
   return generateJson<{ offer: string; benefit: string }>(prompt);
 }
 
-export type ReplySentiment = "BOOKING" | "HAPPY" | "ANGRY" | "UNCLEAR";
+export type ReplySentiment = "BOOKING" | "HAPPY" | "ANGRY" | "UNCLEAR" | "NOT_INTERESTED" | "LATER";
 
 export interface ReplyClassification {
   classification: ReplySentiment;
@@ -267,8 +267,10 @@ export async function classifyReply(replyText: string, conversationSoFar?: strin
     const prompt = `Classify the intent of this email reply into exactly one of:
 - "BOOKING": explicitly wants to schedule a call/meeting, asks for a booking link, or offers specific availability/times.
 - "HAPPY": positive or INTERESTED but NOT explicitly asking to book yet ("this is great", "exactly what we need", "sounds good, tell me more", "send me more information", "interesting, how does it work?"). Any expression of interest counts. Plain factual questions (pricing, features) with no interest expressed are NOT happy by themselves — classify those as "UNCLEAR".
-- "ANGRY": annoyed, hostile, wants to be left alone, complains, or asks to unsubscribe/stop.
-- "UNCLEAR": anything else — a plain question, "maybe later", out-of-office/automated replies, small talk, or genuinely ambiguous replies.
+- "LATER": polite, not now but not never ("not right now", "maybe in a few months", "check back next quarter", "we're busy at the moment"). They did NOT refuse; they asked for time.
+- "NOT_INTERESTED": a calm, polite no ("no thanks", "not interested", "we don't need this", "we already have someone for that"). No anger and no request to be removed.
+- "ANGRY": annoyed, hostile, rude, or complaining ("this is spam", "why are you bothering me") — the tone is upset, not just a calm no. (Explicit requests to unsubscribe/stop are handled before this step.)
+- "UNCLEAR": anything else — a plain question, small talk, out-of-office/automated replies, or genuinely ambiguous replies.
 
 Examples:
 "Can you send me some more information?" -> HAPPY (interested in learning more)
@@ -276,6 +278,9 @@ Examples:
 "Can we hop on a call Tuesday?" -> BOOKING
 "What does this cost?" -> UNCLEAR
 "Stop emailing me" -> ANGRY
+"Not right now, maybe later in the year" -> LATER
+"Thanks, but we're not interested" -> NOT_INTERESTED
+"Why are you spamming me?" -> ANGRY
 
 ${conversationSoFar ? `Conversation so far (oldest first, for context only — classify the LATEST reply below):
 """
@@ -287,9 +292,9 @@ ${untrusted(conversationSoFar)}
 ${untrusted(replyText)}
 """
 
-Respond with ONLY valid JSON matching exactly: {"classification": "BOOKING" | "HAPPY" | "ANGRY" | "UNCLEAR", "confidence": number between 0 and 1, "reason": short string explaining why}`;
+Respond with ONLY valid JSON matching exactly: {"classification": "BOOKING" | "HAPPY" | "ANGRY" | "UNCLEAR" | "NOT_INTERESTED" | "LATER", "confidence": number between 0 and 1, "reason": short string explaining why}`;
     const result = await generateJson<ReplyClassification>(prompt);
-    if (["BOOKING", "HAPPY", "ANGRY", "UNCLEAR"].includes(result.classification)) return result;
+    if (["BOOKING", "HAPPY", "ANGRY", "UNCLEAR", "NOT_INTERESTED", "LATER"].includes(result.classification)) return result;
     return { classification: "UNCLEAR", confidence: 0, reason: "Model returned an unrecognized classification" };
   } catch (err) {
     return { classification: "UNCLEAR", confidence: 0, reason: `Classification failed: ${(err as Error).message}` };
@@ -315,7 +320,11 @@ export async function draftReplyEmail(params: {
   const calendlyUrl = params.calendlyUrl;
   const toneInstructions: Record<ReplySentiment, string> = {
     ANGRY:
-      "The recipient is annoyed or dismissive (they have NOT asked to be removed — that case is handled elsewhere). Write ONE calm, short, respectful reply, no hostility, no pressure and no link: say we were offering them a real opportunity, that businesses that took it up could have grown their business significantly, and that a competitor in their space will now benefit from it instead — then wish them well. Use ONLY what the business context states about what we offer; do not invent numbers, results, customers or a specific service that is not listed. Under 70 words.",
+      "The recipient is annoyed or upset (they have NOT asked to be removed — that case is handled elsewhere). Change approach completely: do NOT pitch and do NOT use urgency or fear. Write ONE calm, short reply in a different voice from the earlier emails: briefly and sincerely apologise for the interruption, say you will not push, and make it easy for them — one short line saying that if a lighter touch or a different kind of information would be more useful you are happy to adjust, otherwise you will leave them be. No link. Use ONLY what the business context states about what we offer; do not invent numbers, results, customers or services. Under 60 words.",
+    NOT_INTERESTED:
+      "The recipient politely said no. Make ONE respectful retention attempt, written differently from the earlier emails. Start by thanking them for answering. Then, in plain words, make a gentle timing point: businesses like theirs that sort out this everyday problem sooner tend to be the ones customers reach first, so waiting has a cost — frame it as timing, never as a guarantee, never name or imply a specific competitor, and no numbers, percentages or invented results. Offer ONE very small next step (a short reply with a yes/no or a ten-minute look), using ONLY what the business context says we do. End by saying that if the answer is still no, you will not write again. No link. Under 80 words.",
+    LATER:
+      "The recipient asked for more time. (No reply is normally sent for this case.) Write a one-line acknowledgement: thanks, no pressure, you will check back later. Under 30 words.",
     BOOKING:
       calendlyUrl
         ? `The recipient wants to schedule a call. Write an enthusiastic, brief reply confirming and giving them this booking link: ${calendlyUrl}. Under 60 words.`

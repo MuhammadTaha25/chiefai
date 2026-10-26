@@ -40,7 +40,7 @@ export interface OutreachStatus {
   generated_at: string;
 }
 
-const INTENT: Record<string, string> = { BOOKING: "booking", HAPPY: "positive", ANGRY: "negative", UNCLEAR: "neutral" };
+const INTENT: Record<string, string> = { BOOKING: "booking", HAPPY: "positive", ANGRY: "negative", UNCLEAR: "neutral", NOT_INTERESTED: "negative", LATER: "neutral" };
 
 interface LeadDbRow {
   name: string | null;

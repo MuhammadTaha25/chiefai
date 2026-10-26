@@ -25,7 +25,7 @@ export function stageForLead(l: PipelineLeadInput): { stage: PipelineStageId; de
   if (l.email_bounced) return { stage: "lost", detail: "Email bounced" };
   if (l.complained) return { stage: "lost", detail: "Marked as spam" };
   if (l.unsubscribed) return { stage: "lost", detail: "Unsubscribed" };
-  if (l.reply_classification === "ANGRY") return { stage: "lost", detail: "Replied: not interested" };
+  if (l.reply_classification === "ANGRY" || l.reply_classification === "NOT_INTERESTED") return { stage: "lost", detail: "Replied: not interested" };
   if (l.manually_stopped) return { stage: "lost", detail: "Stopped manually" };
 
   if (l.reply_received) {
