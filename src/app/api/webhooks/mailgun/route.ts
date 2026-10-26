@@ -51,6 +51,9 @@ const STATUS_FOR_CLASSIFICATION: Record<ReplySentiment, string> = {
   HAPPY: "positive",
   ANGRY: "angry",
   UNCLEAR: "responded",
+  NOT_INTERESTED: "lost",
+  // LATER never updates the status (the lead stays in its sequence); kept only so the record is complete.
+  LATER: "responded",
 };
 
 // `leads.sentiment` has its own, narrower legacy check constraint (only
@@ -63,6 +66,8 @@ const SENTIMENT_COLUMN_VALUE: Record<ReplySentiment, string> = {
   HAPPY: "positive",
   ANGRY: "angry",
   UNCLEAR: "neutral",
+  NOT_INTERESTED: "neutral",
+  LATER: "neutral",
 };
 
 /** Campaign-level reply_count is a rollup for the Campaigns dashboard — bumped once per genuine inbound reply. */
@@ -421,6 +426,21 @@ export async function POST(req: NextRequest) {
           }).catch(() => null)
         : null;
 
+    // "Not now, maybe later" is a request for time, not a refusal: record what they said but leave the lead in its
+    // follow-up sequence (reply_received stays false, next_follow_up_at and status are untouched) and send nothing now.
+    if (classification === "LATER") {
+      const { error: laterError } = await admin
+        .from("leads")
+        .update({ reply_classification: classification, reply_confidence: confidence, reply_reason: reason })
+        .eq("id", lead.id);
+      if (laterError) {
+        // eslint-disable-next-line no-console
+        console.error(`Failed to record LATER reply on lead ${lead.id}:`, laterError.message);
+      }
+      await storeInbound(mailbox.id, classification);
+      return NextResponse.json({ ok: true, classification, confidence, kept_in_sequence: true });
+    }
+
     const { error: leadUpdateError } = await admin
       .from("leads")
       .update({
@@ -435,7 +455,7 @@ export async function POST(req: NextRequest) {
         // it; UNCLEAR must NOT restart it either (§18).
         next_follow_up_at: null,
         ...(meetingTopic ? { meeting_topic: meetingTopic } : {}),
-        ...(classification === "ANGRY"
+        ...(classification === "ANGRY" || classification === "NOT_INTERESTED"
           ? { tone_recovery_attempts: (lead.tone_recovery_attempts ?? 0) + 1 }
           : {}),
       })
@@ -470,8 +490,8 @@ export async function POST(req: NextRequest) {
     } else if (mailbox && client && (await getMailboxReadiness(mailbox.address)) !== "ready") {
       // eslint-disable-next-line no-console
       console.error(`Reply not sent: mailbox ${mailbox.address} has no verified Mailgun domain`);
-    } else if (mailbox && client && classification === "ANGRY" && (lead.tone_recovery_attempts ?? 0) > 0) {
-      // The one-time re-engagement message to an annoyed lead was already sent; a second angry reply gets a human, not another pitch.
+    } else if (mailbox && client && (classification === "ANGRY" || classification === "NOT_INTERESTED") && (lead.tone_recovery_attempts ?? 0) > 0) {
+      // The one-time re-engagement message to an annoyed or uninterested lead was already sent; a second such reply gets a human, not another pitch.
       logEvent("inbound.angry_repeat", { client_id: lead.client_id, lead_id: lead.id, result: "human_takeover" });
     } else if (mailbox && client && !autoReplyCapReached) {
       try {

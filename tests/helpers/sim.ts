@@ -42,7 +42,7 @@ export const ai = {
   aidaBody:
     "Hi Sam,\n\nMost real estate teams lose warm enquiries because replies come hours late. We set up automatic replies and follow-ups so every enquiry gets an answer within minutes, and your agents only step in once a buyer is ready to talk.\n\nWould it be useful if I sent over a short example of how it works for an agency your size?\n\nBest,\nTest Co",
   /** Inbound-reply simulation: what the classifier says, and what the reply drafter writes. */
-  classification: "UNCLEAR" as "BOOKING" | "HAPPY" | "ANGRY" | "UNCLEAR",
+  classification: "UNCLEAR" as "BOOKING" | "HAPPY" | "ANGRY" | "UNCLEAR" | "NOT_INTERESTED" | "LATER",
   replyCalls: [] as Record<string, unknown>[],
   /** Simulates a Gemini outage/slowdown: classifyReply never answers. */
   classifyHangs: false,
