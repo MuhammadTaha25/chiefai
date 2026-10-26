@@ -49,6 +49,41 @@ export function bareDomain(website: string | null | undefined): string {
 
 const stripEndPunct = (s: string) => s.replace(/[.!?\s]+$/, "");
 
+/** Small stable hash so the same lead always gets the same choice (retries never change a subject). */
+function pick(seed: string, n: number): number {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) h = Math.imul(h ^ seed.charCodeAt(i), 16777619);
+  return (h >>> 0) % n;
+}
+
+/**
+ * First-touch subject for the fixed template. "Quick question about X" is the most overused cold-email subject, so
+ * the pattern varies per lead. Every variant only uses facts we hold (company, first name, industry): nothing invented.
+ */
+export function templateSubject(company: string, firstName: string, industry: string): string {
+  const options = [
+    `A question about ${company}`,
+    `Idea for ${company}`,
+    `For the team at ${company}`,
+    `${company}: worth a short chat?`,
+    firstName ? `${firstName}, a thought on ${company}` : `A thought on ${company}`,
+    industry ? `${company} and ${industry}` : `Something for ${company}`,
+  ];
+  return options[pick(`${company}|${firstName}`, options.length)].slice(0, 50).trim();
+}
+
+/** One subject-line style for the AI prompt, picked per lead so a batch does not all share one pattern. */
+export function subjectStyleFor(seed: string): string {
+  const styles = [
+    "a short, specific question about one thing their business does (not a generic question)",
+    "a plain statement of what the email is about, naming their company",
+    "a short idea aimed at their type of business",
+    "a lowercase, casual note, 3-5 words, naming their company or what they do",
+    "a short observation about their industry or location, phrased as a topic",
+  ];
+  return styles[pick(seed, styles.length)];
+}
+
 export function buildTemplateEmail(v: TemplateVars): { subject: string; body: string } {
   const first = tidy(v.firstName).split(" ")[0];
   const company = tidy(v.leadCompany) || "your company";
@@ -79,5 +114,5 @@ export function buildTemplateEmail(v: TemplateVars): { subject: string; body: st
     ...[tidy(v.senderName), tidy(v.senderCompany), bareDomain(v.website)].filter(Boolean),
   ];
 
-  return { subject: `Quick question about ${company}`.slice(0, 60), body: lines.join("\n") };
+  return { subject: templateSubject(company, first, industry), body: lines.join("\n") };
 }
