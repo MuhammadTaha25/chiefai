@@ -56,10 +56,12 @@ interface DueLead {
   industry: string | null;
 }
 
-// Max leads processed per client per cron run. ONE follow-up per client per run: the cron ticks every 5 minutes, so a
-// client's follow-ups are spaced at least that far apart instead of leaving back-to-back within seconds (a burst to
-// one domain is a spam signal), and one tenant's failing leads cannot starve others.
-const MAX_LEADS_PER_CLIENT = 1;
+// Candidates looked at per client per cron run. Still at most ONE follow-up goes out per client per run: the cron ticks
+// every 5 minutes and, once one send is recorded, every later candidate in the same run is held back by the pacing gap
+// below, so a client's follow-ups stay spaced out (a burst to one domain is a spam signal). Looking at more than one
+// candidate matters because the oldest-due lead can be stuck (for example its original mailbox is at its daily limit);
+// with a single candidate that one lead would be picked first on every run and starve every other lead of the client.
+const MAX_LEADS_PER_CLIENT = 10;
 // If anything from this client went out in the last few minutes (a first email or another follow-up), wait for the next run.
 // Random 3-10 min wait (repeatable per previous send), not a fixed gap: see send-jitter.ts.
 
