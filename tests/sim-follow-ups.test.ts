@@ -84,14 +84,21 @@ test("full sequence: 3 follow-ups on schedule, threaded as a chain, last one is 
   assert.equal(S.mailer.sent.length, 3);
 });
 
-test("the client's follow-up setting is respected; '5 follow-ups' is held to the system maximum of 3", async () => {
-  for (const [setting, expected] of [["no follow-up", 0], ["1 follow-up", 1], ["2 follow-ups", 2], ["3 follow-ups", 3], ["5 follow-ups", 3]] as const) {
+test("the client's follow-up setting is respected; '5 follow-ups' is honoured up to the system maximum of 5", async () => {
+  for (const [setting, expected] of [["no follow-up", 0], ["1 follow-up", 1], ["2 follow-ups", 2], ["3 follow-ups", 3], ["5 follow-ups", 5]] as const) {
     S.resetWorld(); S.setClock(S.T0);
     const w = world({ criteria: { follow_ups: setting, follow_up_delay_days: 0.01 } });
     S.seedSentLead(w.cid, w.mbId);
     for (let i = 0; i < 6; i++) { await run(w.cid); S.setClock(S.T0 + (i + 1) * 20 * S.MIN); }
     assert.equal(S.mailer.sent.length, expected, `setting "${setting}"`);
   }
+});
+
+test("a client who gave no follow-up answer gets the full 5, and never a 6th", async () => {
+  const w = world({ criteria: { follow_ups: undefined, follow_up_delay_days: 0.01 } });
+  S.seedSentLead(w.cid, w.mbId);
+  for (let i = 0; i < 8; i++) { await run(w.cid); S.setClock(S.T0 + (i + 1) * 20 * S.MIN); }
+  assert.equal(S.mailer.sent.length, 5);
 });
 
 test("the first follow-up waits the configured delay after the first email", async () => {

@@ -19,7 +19,9 @@ import { assertDomainUsableByClient, getExternalDomainsForClient, isDomainDiscon
 // of how long the interval itself is.
 // Hard system ceiling — never exceeded regardless of any client-configured
 // follow-up count (maxFollowUpsFor below can only make this stricter).
-const HARD_MAX_FOLLOW_UPS = 3;
+const HARD_MAX_FOLLOW_UPS = 5;
+// When the client gave no (or an unreadable) answer: the full sequence.
+const DEFAULT_FOLLOW_UPS = 5;
 
 // Back-off after a draft/send failure (transient Gemini/Mailgun error): the lead keeps its place in the sequence.
 const SEND_FAILURE_RETRY_MS = 60 * 60 * 1000;
@@ -35,11 +37,11 @@ const FOLLOW_UP_COUNT_WORDS: Record<string, number> = {
 };
 
 function maxFollowUpsFor(followUpsAnswer: string | undefined): number {
-  if (!followUpsAnswer) return 3;
+  if (!followUpsAnswer) return DEFAULT_FOLLOW_UPS;
   const known = FOLLOW_UP_COUNT_WORDS[followUpsAnswer.toLowerCase()];
   if (known !== undefined) return known;
   const parsed = parseInt(followUpsAnswer, 10);
-  return Number.isFinite(parsed) ? parsed : 3;
+  return Number.isFinite(parsed) ? parsed : DEFAULT_FOLLOW_UPS;
 }
 
 interface DueLead {
@@ -259,7 +261,7 @@ export async function runFollowUpBatch(opts: { clientIdFilter: string | null; is
 
       const sellingDescription = (job?.criteria?.what_you_sell as string | undefined)?.trim();
       // A client can configure fewer follow-ups, never more than the spec's
-      // hard system ceiling of 3 (§17).
+      // hard system ceiling of 5.
       const maxFollowUps = Math.min(maxFollowUpsFor(job?.criteria?.follow_ups as string | undefined), HARD_MAX_FOLLOW_UPS);
 
       // follow_up_number counts the INITIAL email as 1, so the cap, touch number, status and email angle all come
@@ -458,7 +460,7 @@ export async function recoverOrphanedFollowUps(admin: ReturnType<typeof createAd
     .from("leads")
     .select("id, client_id, follow_up_number, last_contact_at")
     .gte("follow_up_number", 1)
-    .lte("follow_up_number", 3)
+    .lte("follow_up_number", HARD_MAX_FOLLOW_UPS)
     .is("next_follow_up_at", null)
     .eq("reply_received", false)
     .eq("unsubscribed", false)

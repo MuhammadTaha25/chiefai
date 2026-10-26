@@ -408,13 +408,16 @@ Respond with ONLY valid JSON matching exactly: {"topic": string}`;
  * Follow-up nudge for a lead who hasn't replied yet — references that this
  * is a follow-up (not a first touch) without being annoying about it.
  */
-// Each follow-up uses a different angle so the sequence never feels copy-pasted.
+// Each follow-up uses a different angle so the sequence never feels copy-pasted. The final follow-up (whichever number it is)
+// always uses CLOSING_ANGLE instead.
+const CLOSING_ANGLE =
+  "Very short 'closing the loop' note — say you don't want to keep emailing if it's not relevant, and ask if now is a bad time or if it would be better to reconnect later.";
+
 const FOLLOW_UP_ANGLES: Record<number, string> = {
   1: "Attention: one brief, specific observation about their business type or role. Interest: the everyday problem that observation points to. Action: one easy yes/no question (under 12 words) about whether it is a problem for them.",
   2: "Attention: a new opening that is NOT the first email's. Interest: what usually happens to a business like theirs when this everyday problem is left as it is, stated plainly and calmly (no fear, no fake urgency, no numbers). Action: one short question, under 12 words.",
   3: "Now, lightly, introduce that you may be able to help. Attention: a fresh one-line opening. Desire: one concrete outcome a business like theirs could get from what we sell (use ONLY what the offer text says; never state a number, percentage or customer result). Action: one low-pressure question under 12 words asking whether they are open to hearing how.",
-  4: "Very short 'closing the loop' note — say you don't want to keep emailing if it's not relevant, and ask if now is a bad time or if it would be better to reconnect later.",
-  5: "Mention one specific thing that recently changed in their industry (use only what is in the business context; if nothing specific, mention that you're expanding in their space) and tie it to why you're reaching out.",
+  4: "A different, helpful angle that is NOT a repeat of the earlier emails: ask whether someone else handles this at their business, or whether they already have it covered another way. Plain and friendly, one short question under 12 words, no pitch, no numbers.",
 };
 
 export async function draftFollowUpEmail(params: {
@@ -432,9 +435,9 @@ export async function draftFollowUpEmail(params: {
   tone?: string;
   businessContext?: string;
 }): Promise<AidaEmail> {
-  // The final follow-up is always the closing-the-loop note (angle 4); earlier ones use angles 1, 2, 3 in order.
+  // The final follow-up is always the closing-the-loop note; earlier ones use angles 1, 2, 3, 4 in order.
   const angle = params.isLastFollowUp
-    ? FOLLOW_UP_ANGLES[4]
+    ? CLOSING_ANGLE
     : (FOLLOW_UP_ANGLES[params.followUpNumber] ?? FOLLOW_UP_ANGLES[1]);
   const earlier = (params.previousEmails ?? []).slice(-3);
   const earlierBlock = earlier.length
