@@ -5,9 +5,8 @@
  *
  *   Hi {first_name},
  *   Since {company} works in {industry}, I thought this might be relevant.
- *   I'm reaching out because we help businesses {offer}.
- *   For a business like yours, this could mean {benefit}.
- *   Would you be open to a quick conversation to see whether this could be useful for {company}?
+ *   We help businesses {offer}. For a business like yours, that could mean {benefit}.
+ *   Is this on your radar at {company}, or is now not a good time?
  *   Best,
  *   {sender_name}
  *   {sender_company}
@@ -104,11 +103,9 @@ export function buildTemplateEmail(v: TemplateVars): { subject: string; body: st
     "",
     opener,
     "",
-    `I'm reaching out because we help businesses ${stripEndPunct(tidy(v.offer))}.`,
+    `We help businesses ${stripEndPunct(tidy(v.offer))}. For a business like yours, that could mean ${stripEndPunct(tidy(v.benefit))}.`,
     "",
-    `For a business like yours, this could mean ${stripEndPunct(tidy(v.benefit))}.`,
-    "",
-    `Would you be open to a quick conversation to see whether this could be useful for ${company}?`,
+    `Is this on your radar at ${company}, or is now not a good time?`,
     "",
     "Best,",
     ...[tidy(v.senderName), tidy(v.senderCompany), bareDomain(v.website)].filter(Boolean),

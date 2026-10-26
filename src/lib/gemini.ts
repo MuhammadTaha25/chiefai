@@ -196,17 +196,17 @@ Desired outcome: ${params.callToAction ?? "get a reply and book a short call"}
 Write the email body and subject line following these principles:
 
 AIDA structure (but don't make it obvious — it should flow naturally):
-- Attention: open with something specific to them (their business type, location, or what they likely deal with day-to-day) — NOT a generic opener
-- Interest: one sentence on a real challenge businesses like theirs typically face
-- Desire: one sentence on how ${params.senderCompany} can help, naming ONE concrete outcome the reader can picture (taken only from the offer text above, e.g. "every enquiry answered within minutes") — plain words, no hype, no numbers you were not given
-- Action: ONE short, easy-to-answer question (yes/no style, under 12 words, not a demand) as the CTA
+- Attention: open with something specific to them (their business type, location, or what they likely deal with day-to-day) — NOT a generic opener. Use ONLY facts listed above; never write "I saw", "I noticed" or imply you looked at their business
+- Interest: LEAD WITH THE PAIN. One sentence on a real, everyday challenge businesses like theirs typically face, worded so the reader thinks "yes, that is us". The goal of this email is to start a conversation, not to pitch
+- Desire: at most ONE short sentence (about 12 words) on how ${params.senderCompany} can help, naming ONE concrete outcome (taken only from the offer text above) — plain words, no hype, no numbers you were not given. Keep the pitch light: the pain comes first
+- Action: ONE short, easy-to-answer question (under 12 words, not a demand) as the CTA, with an easy way out built into it, e.g. "Is this on your radar, or is now not a good time?"
 
 Voice & style:
 - Write like a real person emailing another real person — short, direct, no corporate speak
 - Vary sentence length naturally. Use contractions (we're, it's, you'd).
 - Opening: use their first name or business name — do NOT start with "I hope", "I came across", "I noticed", or "My name is"
-- Subject line: ${subjectStyleFor(`${params.leadCompany}|${params.leadName}`)}. 4–7 words (roughly 30–50 characters), conversational, true to the email. Do NOT use the phrase "quick question" (it is the most overused cold-email subject) and do not copy a stock pattern.
-- 55–80 words total for the body (shorter first emails get more replies). One short paragraph or two very short ones.
+- Subject line: ${subjectStyleFor(`${params.leadCompany}|${params.leadName}`)}. 2–5 words (roughly 15–40 characters), conversational, true to the email, and it must contain their company name or the word for what they do. Do NOT use the phrase "quick question" (it is the most overused cold-email subject) and do not copy a stock pattern.
+- 40–65 words total for the body (shorter first emails get more replies). One short paragraph or two very short ones. Plain, simple words.
 - Plain text only. No bullet points, no bold, no links, no attachments.
 - Do NOT write a greeting line or a sign-off: the system adds "Hi <name>," and the sender's sign-off itself. Write only the message body.
 - Never use: free, guarantee, act now, limited time, click here, buy now, 100%, risk-free, urgent, double your, cash, winner, "I wanted to reach out", "touch base", "circle back", "synergy"
@@ -402,8 +402,8 @@ Respond with ONLY valid JSON matching exactly: {"topic": string}`;
 // Each follow-up uses a different angle so the sequence never feels copy-pasted.
 const FOLLOW_UP_ANGLES: Record<number, string> = {
   1: "Attention: one brief, specific observation about their business type or role. Interest: the everyday problem that observation points to. Action: one easy yes/no question (under 12 words) about whether it is a problem for them.",
-  2: "Attention: a new opening that is NOT the first email's. Desire: one concrete outcome a business like theirs could get from what we sell (use ONLY what the offer text says; never state a number, percentage or customer result). Action: one short yes/no question, under 12 words.",
-  3: "Try a completely different angle. Attention: ask about their current process or challenge. Interest: one sentence on why that matters. Action: one genuine, low-pressure question under 12 words — no sales language.",
+  2: "Attention: a new opening that is NOT the first email's. Interest: what usually happens to a business like theirs when this everyday problem is left as it is, stated plainly and calmly (no fear, no fake urgency, no numbers). Action: one short question, under 12 words.",
+  3: "Now, lightly, introduce that you may be able to help. Attention: a fresh one-line opening. Desire: one concrete outcome a business like theirs could get from what we sell (use ONLY what the offer text says; never state a number, percentage or customer result). Action: one low-pressure question under 12 words asking whether they are open to hearing how.",
   4: "Very short 'closing the loop' note — say you don't want to keep emailing if it's not relevant, and ask if now is a bad time or if it would be better to reconnect later.",
   5: "Mention one specific thing that recently changed in their industry (use only what is in the business context; if nothing specific, mention that you're expanding in their space) and tie it to why you're reaching out.",
 };
