@@ -383,3 +383,17 @@ test("a spammy AI follow-up (\"free\") is never sent: redrafted, then deferred i
   assert.ok(S.leadRow(id(lead)).next_follow_up_at);
   assert.ok(S.ai.followUpCalls.length >= 2, "should have tried to redraft");
 });
+
+test("cron mode: a stuck oldest-due lead (its mailbox is at the daily limit) does not starve the client's other leads", async () => {
+  const w = world({ mailboxes: 2, limit: 3 });
+  const stuckMb = id(w.mailboxes[0]), freeMb = id(w.mailboxes[1]);
+  // Oldest-due lead is pinned to a mailbox that is already full today.
+  const stuck = S.seedSentLead(w.cid, stuckMb, { dueInMs: -2 * S.HOUR });
+  for (let i = 0; i < 2; i++) S.seedSentLead(w.cid, stuckMb, { dueInMs: 3 * S.DAY });
+  // A newer due lead on the free mailbox.
+  const next = S.seedSentLead(w.cid, freeMb, { dueInMs: -S.MIN });
+  const r = await app.followUps.runFollowUpBatch({ clientIdFilter: null, isCron: true });
+  assert.equal(r.results.find((x) => x.leadId === id(next))?.result, "sent", "the free lead goes out in the same run");
+  assert.equal(r.results.filter((x) => x.result === "sent").length, 1, "still only one send per client per run");
+  assert.ok(S.leadRow(id(stuck)).next_follow_up_at, "the stuck lead stays in the queue, unchanged");
+});
