@@ -41,7 +41,7 @@ export function DynamicForm({
   submitLabel = "Find leads",
   formId = "default",
   reviewTitle = "Here's what we'll look for",
-  reviewNote = "Review the plan below. Submitting only finds and saves leads — no emails are sent. You will draft, review and send each email yourself from the Leads page.",
+  reviewNote = "Review the plan below. Submitting finds and saves leads, then outreach starts automatically: emails go out from your mailboxes within your send window and daily limits, with follow-ups if there is no reply. You can pause sending any time.",
   initialValues,
   initialReviewing = false,
   ignoreDraft = false,
