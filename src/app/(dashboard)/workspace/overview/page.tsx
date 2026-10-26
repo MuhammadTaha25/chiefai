@@ -5,6 +5,8 @@ import { MetricCard } from "@/components/workspace/MetricCard";
 import { SectionHeader } from "@/components/workspace/SectionHeader";
 import { BarChart } from "@/components/workspace/BarChart";
 import { EmptyState } from "@/components/workspace/EmptyState";
+import { getSendingHealth } from "@/lib/sending-health";
+import SendingHealthCard from "@/components/sending-health-card";
 
 const ACTIVITY_ICON: Record<string, { icon: typeof CheckCircle2; color: string }> = {
   success: { icon: CheckCircle2, color: "#16A36B" },
@@ -18,6 +20,11 @@ const fmtPct = (n: number | null) => (n == null ? "—" : `${n >= 0 ? "+" : ""}$
 export default async function OverviewPage() {
   const supabase = await createClient();
   const data = await getWorkspaceOverview(supabase);
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: clientRow } = user ? await supabase.from("clients").select("id").eq("auth_user_id", user.id).maybeSingle() : { data: null };
+  const sendingHealth = clientRow ? await getSendingHealth(supabase, clientRow.id) : null;
   const today = new Date().toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" });
 
   return (
@@ -29,6 +36,8 @@ export default async function OverviewPage() {
           <p className="ns-body mt-1">Here is what needs your attention today.</p>
         </div>
       </div>
+
+      {sendingHealth && <SendingHealthCard health={sendingHealth} />}
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <MetricCard
