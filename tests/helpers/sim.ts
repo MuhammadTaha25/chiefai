@@ -88,6 +88,8 @@ export async function loadApp() {
           ai.followUpBody,
           "Quick thought for Acme: when enquiries land during viewings, who picks them up? Curious whether some wait until evening and go cold. Is that something you see?",
           "Different question entirely: what does your team do with enquiries that arrive on weekends? Wondering if a simple auto-reply could cover that gap. Worth exploring?",
+          "Is someone else on your side in charge of how new property enquiries are handled? Happy to point this at the right person if so. Who would that be?",
+          "Last note from me, promise. If this is not a priority right now I will stop writing. Would it be better to reconnect in a few months?",
         ];
         const body = ai.rotateBodies && ai.followUpBody === ai.defaultFollowUpBody ? variants[(ai.followUpCalls.length - 1) % variants.length] : ai.followUpBody;
         return { subject: ai.followUpSubject, body };
