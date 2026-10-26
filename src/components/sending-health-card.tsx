@@ -9,7 +9,7 @@ const STYLE: Record<SendingHealth["level"], { box: string; icon: string }> = {
 export default function SendingHealthCard({ health }: { health: SendingHealth }) {
   const s = STYLE[health.level];
   return (
-    <div role={health.level === "bad" ? "alert" : "status"} className={`mb-6 rounded-xl border px-4 py-3 text-sm ${s.box}`}>
+    <div role={health.level === "bad" ? "alert" : "status"} className={`rounded-xl border px-4 py-3 text-sm ${s.box}`}>
       <p className="font-medium">
         <span aria-hidden="true">{s.icon} </span>
         {health.headline}
