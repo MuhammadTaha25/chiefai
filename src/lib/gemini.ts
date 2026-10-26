@@ -1,3 +1,4 @@
+import { subjectStyleFor } from "@/lib/outreach-template";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-3.6-flash";
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
@@ -204,7 +205,7 @@ Voice & style:
 - Write like a real person emailing another real person — short, direct, no corporate speak
 - Vary sentence length naturally. Use contractions (we're, it's, you'd).
 - Opening: use their first name or business name — do NOT start with "I hope", "I came across", "I noticed", or "My name is"
-- Subject line: conversational and specific, like something a colleague would write (e.g. "quick question about [their business]" or "idea for [their company]") — lowercase preferred, 4–7 words (roughly 30–50 characters)
+- Subject line: ${subjectStyleFor(`${params.leadCompany}|${params.leadName}`)}. 4–7 words (roughly 30–50 characters), conversational, true to the email. Do NOT use the phrase "quick question" (it is the most overused cold-email subject) and do not copy a stock pattern.
 - 55–80 words total for the body (shorter first emails get more replies). One short paragraph or two very short ones.
 - Plain text only. No bullet points, no bold, no links, no attachments.
 - Do NOT write a greeting line or a sign-off: the system adds "Hi <name>," and the sender's sign-off itself. Write only the message body.

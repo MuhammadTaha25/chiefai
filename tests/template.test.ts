@@ -16,7 +16,8 @@ const vars = {
 
 test("fills the fixed structure and signature", () => {
   const e = buildTemplateEmail(vars);
-  assert.equal(e.subject, "Quick question about Acme Dental");
+  assert.match(e.subject, /Acme Dental/);
+  assert.doesNotMatch(e.subject, /quick question/i);
   assert.equal(
     e.body,
     [
@@ -73,4 +74,21 @@ test("an industry slug with underscores reads as plain words in the opener", () 
   const e = buildTemplateEmail({ ...vars, industry: "real_estate" });
   assert.match(e.body, /works in real estate,/);
   assert.doesNotMatch(e.body, /real_estate/);
+});
+
+import { templateSubject, subjectStyleFor } from "../src/lib/outreach-template.ts";
+
+test("subjects vary across leads, are stable per lead, never say 'quick question', and always name the company", () => {
+  const names = ["Acme Dental", "Harbor Lane Realty", "Bright Smile Studio", "Oak & Pine Law", "Delta Plumbing", "Nova Fitness", "Riverbend Cafe", "Summit Roofing"];
+  const subjects = names.map((c) => templateSubject(c, "Sam", "dental care"));
+  assert.ok(new Set(subjects.map((s) => s.replace(/Acme Dental|Harbor Lane Realty|Bright Smile Studio|Oak & Pine Law|Delta Plumbing|Nova Fitness|Riverbend Cafe|Summit Roofing/, "X"))).size >= 3, "at least 3 different patterns");
+  names.forEach((c, i) => {
+    assert.ok(subjects[i].includes(c), "company named");
+    assert.ok(subjects[i].length <= 50);
+    assert.doesNotMatch(subjects[i], /quick question/i);
+    assert.equal(templateSubject(c, "Sam", "dental care"), subjects[i], "stable for the same lead");
+  });
+  assert.doesNotMatch(templateSubject("Acme", "", ""), /undefined|\{|\}/);
+  assert.ok(subjectStyleFor("a|b").length > 10);
+  assert.equal(subjectStyleFor("a|b"), subjectStyleFor("a|b"));
 });
