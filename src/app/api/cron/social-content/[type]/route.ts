@@ -6,6 +6,8 @@ import { generateAdVideo, generateSocialImage } from "@/lib/gemini";
 import { createStrategicItem, historyRow, imagePromptFallback, loadContentHistory, publishToConnections, type StrategicItem } from "@/lib/social-content";
 import { dueFromItems, dueItems, isValidTimeZone, localClock, parseWeeklyPlan, planItems, slotKey, weeklyItems, type ScheduleInput, type WeeklyPlan } from "@/lib/social-schedule";
 import { logEvent } from "@/lib/log-event";
+import { ensureWeekPlan } from "@/lib/week-plan-store";
+import { entryKey, weekStartOf, weeksToPlan, type WeekEntry } from "@/lib/week-plan";
 
 /**
  * Settings-driven social content scheduler.
@@ -169,6 +171,30 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ type
     });
 
     const due = weeklyPlan ? dueFromItems(planned, clock, type) : dueItems(input, clock, type);
+
+    // The week's titles/hooks/visual ideas are decided ONCE (this week always, next week from Sunday evening) and each
+    // day's post is made from its entry. Any problem here only means the post is decided on the day, as before.
+    let thisWeek: WeekEntry[] | null = null;
+    if (type === "post" && !dry) {
+      try {
+        const postItems = planned.filter((it) => it.kind === "post");
+        if (postItems.length) {
+          const wantedWeeks = weeksToPlan(clock);
+          // Skip the (cheap) existence check + generation entirely on ticks where nothing is due and no new week is needed.
+          if (due.length || wantedWeeks.length > 1) {
+            const ctxForPlan = await getClientBusinessContext(admin, clientId);
+            const historyForPlan = await loadContentHistory(admin, clientId);
+            for (const weekStart of wantedWeeks) {
+              const entries = await ensureWeekPlan(admin, { clientId, weekStart, ctx: ctxForPlan, history: historyForPlan, items: postItems });
+              if (weekStart === weekStartOf(clock.date, clock.weekday)) thisWeek = entries;
+            }
+          }
+        }
+      } catch (err) {
+        logEvent("social_content.week_plan_failed", { client_id: clientId, error: (err as Error).message });
+      }
+    }
+
     for (const item of due) {
       const key = slotKey(type, clock.date, item.slot);
       const { data: existing } = await admin.from("social_posts").select("id").eq("client_id", clientId).eq("dedupe_key", key).limit(1);
@@ -220,7 +246,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ type
         }
 
         const format = type === "story" ? "story" : item.format === "video" ? "video" : "image";
-        const strategic: StrategicItem = await createStrategicItem({ ctx, history, format, supports });
+        const plannedEntry = type === "post" ? thisWeek?.find((e) => e.key === entryKey(item.weekday, item.slot)) : undefined;
+        const strategic: StrategicItem = await createStrategicItem({ ctx, history, format, supports, planned: plannedEntry });
         // Carousel: three square slides in one visual style (cover, detail, call to action).
         const slideNotes = ["Slide 1 of 3: the cover, with the strongest hook.", "Slide 2 of 3: the key detail or proof.", "Slide 3 of 3: a clear call to action."];
 

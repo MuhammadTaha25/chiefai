@@ -43,6 +43,8 @@ export async function planStrategicContent(params: {
   supports?: { topic: string; hook: string; caption: string };
   /** Why a previous attempt was rejected (repeat / restricted phrase / unsupported price). */
   rejectedBecause?: string;
+  /** The week plan already decided this post's title, hook and what it shows: write the caption and prompts FROM it. */
+  planned?: { topic: string; hook: string; visualIdea: string };
   ownerPillars?: string[];
   /** Brand visual identity — injected explicitly into image and caption prompts. */
   brandColors?: string[];
@@ -80,7 +82,7 @@ ${params.ownerPillars?.length ? `- The owner likes these themes; use one only if
     params.supports
       ? `\nThis is a STORY that supports this feed post — write a short teaser/adaptation, NOT a copy:\nTopic: ${untrusted(params.supports.topic, 300)}\nHook: ${untrusted(params.supports.hook, 300)}\nCaption: ${untrusted(params.supports.caption, 600)}\n`
       : ""
-  }${params.rejectedBecause ? `\nIMPORTANT: your previous attempt was rejected because it ${params.rejectedBecause}. Fix that and choose a clearly different angle.\n` : ""}
+  }${params.planned ? `\nTHIS POST WAS ALREADY PLANNED FOR THE WEEK — do not choose a different subject:\n- Title/topic: ${untrusted(params.planned.topic, 300)}\n- Hook: ${untrusted(params.planned.hook, 300)}\n- What the picture/video shows: ${untrusted(params.planned.visualIdea, 400)}\nReturn this topic and this hook unchanged. The caption must deliver on the hook. ${isVideo ? "The videoPrompt must film exactly the scene described above (one subject, one action, one setting, one camera move; no text on screen)." : "The imagePrompt must show exactly the scene described above."}\n` : ""}${params.rejectedBecause ? `\nIMPORTANT: your previous attempt was rejected because it ${params.rejectedBecause}. Fix that${params.planned ? " without changing the planned topic and hook" : " and choose a clearly different angle"}.\n` : ""}
 Write:
 - topic: the specific subject (a concrete idea, not the pillar name)
 - hook: the first line that stops the scroll (${isVideo ? "spoken/on-screen opener for the video" : "opening line of the caption"})
@@ -97,8 +99,8 @@ Respond with ONLY valid JSON: {"topic": string, "hook": string, "caption": strin
   const out = await generateJson<Partial<StrategicContentDraft>>(prompt);
   const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
   return {
-    topic: str(out.topic),
-    hook: str(out.hook),
+    topic: params.planned ? params.planned.topic : str(out.topic),
+    hook: params.planned ? params.planned.hook : str(out.hook),
     caption: str(out.caption),
     hashtags: Array.isArray(out.hashtags)
       ? out.hashtags.map((h) => String(h).replace(/^#+/, "").replace(/\s+/g, "").trim()).filter(Boolean).slice(0, 12)
@@ -107,6 +109,48 @@ Respond with ONLY valid JSON: {"topic": string, "hook": string, "caption": strin
     storyImagePrompt: str(out.storyImagePrompt),
     videoPrompt: str(out.videoPrompt),
   };
+}
+
+// ---- Weekly plan: titles, hooks and what each post shows -------------------
+
+export interface WeekIdeaRequest {
+  companyName: string;
+  businessContext: string;
+  historyBlock: string;
+  /** Per planned post, already decided by code. */
+  entries: { key: string; dayName: string; format: "image" | "carousel" | "video"; pillar: string; pillarBrief: string; productName?: string; audience?: string }[];
+  /** Why the previous attempt was not accepted. */
+  rejectedBecause?: string;
+}
+
+/**
+ * One call writes the week's titles, hooks and visual ideas TOGETHER so they differ from each other. The pillar, product
+ * and CTA of every post are fixed by code and not up for discussion. Hook rules follow common scroll-stopping practice:
+ * specific, relevant to the reader, an honest curiosity gap, never invented numbers.
+ */
+export async function planWeekIdeas(params: WeekIdeaRequest): Promise<{ key: string; topic: string; hook: string; visualIdea: string }[]> {
+  const list = params.entries
+    .map(
+      (e) =>
+        `- key "${e.key}" (${e.dayName}, ${e.format}): pillar ${e.pillar} — ${e.pillarBrief}${e.productName ? ` | focus: ${e.productName}` : ""}${e.audience ? ` | audience: ${e.audience}` : ""}`,
+    )
+    .join("\n");
+  const prompt = `${params.businessContext ? params.businessContext + "\n\n" : ""}${params.historyBlock ? params.historyBlock + "\n\n" : ""}You are ${params.companyName}'s social media strategist. Plan this week's feed posts as ONE set, so they are clearly different from each other and from the recent posts above.
+
+POSTS TO PLAN (pillar, product and audience are fixed — do not change them):
+${list}
+
+For every post write:
+- topic: a specific, concrete title a customer would stop for. NOT an abstract theme ("The impact of X on productivity"). Name a real situation, problem or question from this business's own world.
+- hook: the first line of the post, under 18 words. Specific beats vague. Pair something the reader recognises about themselves with a real curiosity gap. Honest: the post must deliver what the hook promises. Use no invented numbers, results or claims. Vary the openings across the week (do not start two hooks with the same words).
+- visualIdea: ONE sentence saying exactly what the picture or video SHOWS: a concrete person, place or object doing one thing in one setting (e.g. "A shop owner glancing at a phone that keeps ringing while both hands are busy with a customer"). It must be something a camera can film; never an idea, a chart or a concept. For a video it must be a single scene with ONE subject, ONE action and ONE setting, no text on screen. Do not show real brand logos or identifiable real people.
+
+Only use facts found in the business context. No invented offers, prices, results, awards or testimonials. No fake urgency.${params.rejectedBecause ? `\n\nIMPORTANT: your previous plan was not accepted because ${params.rejectedBecause}. Fix that.` : ""}
+
+Respond with ONLY valid JSON: {"entries": [{"key": string, "topic": string, "hook": string, "visualIdea": string}]} with exactly one entry per key above.`;
+  const out = await generateJson<{ entries?: { key?: unknown; topic?: unknown; hook?: unknown; visualIdea?: unknown }[] }>(prompt);
+  const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  return (Array.isArray(out.entries) ? out.entries : []).map((e) => ({ key: str(e.key), topic: str(e.topic), hook: str(e.hook), visualIdea: str(e.visualIdea) }));
 }
 
 // ---- Grounded comment / DM replies ----------------------------------------
