@@ -6,7 +6,7 @@ import { generateAdVideo, generateSocialImage } from "@/lib/gemini";
 import { createStrategicItem, historyRow, imagePromptFallback, loadContentHistory, publishToConnections, type StrategicItem } from "@/lib/social-content";
 import { dueFromItems, dueItems, isValidTimeZone, localClock, parseWeeklyPlan, planItems, slotKey, weeklyItems, type ScheduleInput, type WeeklyPlan } from "@/lib/social-schedule";
 import { logEvent } from "@/lib/log-event";
-import { ensureWeekPlan } from "@/lib/week-plan-store";
+import { ensureWeekPlan, loadWeekPlan } from "@/lib/week-plan-store";
 import { entryKey, weekStartOf, weeksToPlan, type WeekEntry } from "@/lib/week-plan";
 
 /**
@@ -179,15 +179,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ type
       try {
         const postItems = planned.filter((it) => it.kind === "post");
         if (postItems.length) {
-          const wantedWeeks = weeksToPlan(clock);
-          // Skip the (cheap) existence check + generation entirely on ticks where nothing is due and no new week is needed.
-          if (due.length || wantedWeeks.length > 1) {
-            const ctxForPlan = await getClientBusinessContext(admin, clientId);
-            const historyForPlan = await loadContentHistory(admin, clientId);
-            for (const weekStart of wantedWeeks) {
-              const entries = await ensureWeekPlan(admin, { clientId, weekStart, ctx: ctxForPlan, history: historyForPlan, items: postItems });
-              if (weekStart === weekStartOf(clock.date, clock.weekday)) thisWeek = entries;
+          // Cheap existence check first; the business context and history are only loaded when a week is actually missing.
+          let ctxForPlan: Awaited<ReturnType<typeof getClientBusinessContext>> | null = null;
+          let historyForPlan: Awaited<ReturnType<typeof loadContentHistory>> | null = null;
+          for (const weekStart of weeksToPlan(clock)) {
+            let entries = await loadWeekPlan(admin, clientId, weekStart);
+            if (!entries) {
+              ctxForPlan ??= await getClientBusinessContext(admin, clientId);
+              historyForPlan ??= await loadContentHistory(admin, clientId);
+              entries = await ensureWeekPlan(admin, { clientId, weekStart, ctx: ctxForPlan, history: historyForPlan, items: postItems });
             }
+            if (weekStart === weekStartOf(clock.date, clock.weekday)) thisWeek = entries;
           }
         }
       } catch (err) {
