@@ -292,6 +292,14 @@ export async function createInboundRoute(_address: string, webhookUrl: string) {
   return res.json();
 }
 
+/** All Mailgun routes (read-only), used to check that inbound replies still reach this app. */
+export async function listInboundRoutes(): Promise<{ expression: string; actions: string[] }[]> {
+  const res = await fetch(`${MAILGUN_API_BASE_URL}/routes?limit=100`, { headers: { Authorization: authHeader() } });
+  if (!res.ok) throw new Error(`Mailgun routes list failed: ${res.status}`);
+  const data = (await res.json()) as { items?: { expression: string; actions: string[] }[] };
+  return data.items ?? [];
+}
+
 export type MailboxReadiness = "ready" | "verifying" | "not_provisioned" | "sandbox";
 
 const readinessCache = new Map<string, { at: number; value: MailboxReadiness }>();
