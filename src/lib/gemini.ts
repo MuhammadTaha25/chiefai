@@ -206,7 +206,7 @@ Voice & style:
 - Vary sentence length naturally. Use contractions (we're, it's, you'd).
 - Opening: use their first name or business name — do NOT start with "I hope", "I came across", "I noticed", or "My name is"
 - Subject line: ${subjectStyleFor(`${params.leadCompany}|${params.leadName}`)}. 2–5 words (roughly 15–40 characters), conversational, true to the email, and it must contain their company name or the word for what they do. Do NOT use the phrase "quick question" (it is the most overused cold-email subject) and do not copy a stock pattern.
-- 40–65 words total for the body (shorter first emails get more replies). One short paragraph or two very short ones. Plain, simple words.
+- 50–75 words total for the body (short, but long enough that the reader knows who you are and what you do). One short paragraph or two very short ones. Plain, simple words.
 - Plain text only. No bullet points, no bold, no links, no attachments.
 - Do NOT write a greeting line or a sign-off: the system adds "Hi <name>," and the sender's sign-off itself. Write only the message body.
 - Never use: free, guarantee, act now, limited time, click here, buy now, 100%, risk-free, urgent, double your, cash, winner, "I wanted to reach out", "touch base", "circle back", "synergy"
