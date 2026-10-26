@@ -232,7 +232,19 @@ export async function POST(req: NextRequest) {
         .limit(1)
         .maybeSingle<{ lead_id: string }>();
       if (!threadError && threadMatch) {
-        const viaThread = candidates?.find((c) => c.id === threadMatch.lead_id);
+        let viaThread = candidates?.find((c) => c.id === threadMatch.lead_id);
+        if (!viaThread) {
+          // The prospect replied from a DIFFERENT address than the one we wrote to (alias, forwarding, a shared inbox).
+          // The thread still proves which of OUR messages this answers, so use that lead (same client only) - otherwise
+          // a STOP from another address would be ignored and the sequence would keep going.
+          const { data: threadLead } = await admin
+            .from("leads")
+            .select("id, client_id, campaign_id, name, tone_recovery_attempts, unsubscribed, booked, complained, email_bounced, manually_stopped")
+            .eq("client_id", receivingMailbox.client_id)
+            .eq("id", threadMatch.lead_id)
+            .maybeSingle();
+          viaThread = threadLead ?? undefined;
+        }
         if (viaThread) {
           lead = viaThread;
           matchedByThread = true;
