@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendMail, mailgunDomainForAddress, getMailboxReadiness } from "@/lib/mailgun";
 import { classifyReply, draftReplyEmail, generateMeetingTopic, type ReplySentiment } from "@/lib/gemini";
-import { isUnsubscribeRequest, unsubscribeConfirmation, isAutomatedMessage } from "@/lib/compliance";
+import { isUnsubscribeRequest, unsubscribeConfirmation, isAutomatedMessage, fromWithDisplayName } from "@/lib/compliance";
 import { insertOutreachLog, REPLY_TOUCH_NUMBER } from "@/lib/outreach-log";
 import { logEvent } from "@/lib/log-event";
 import { verifyMailgunSignature } from "@/lib/webhook-security";
@@ -362,7 +362,7 @@ export async function POST(req: NextRequest) {
           const sentMsg = await sendMail({
             inReplyTo: messageId,
             domain: mailgunDomainForAddress(mailbox.address),
-            from: mailbox.address,
+            from: fromWithDisplayName(client.company_name, mailbox.address),
             to: senderEmail,
             subject: confirmation.subject,
             text: confirmation.body,
@@ -523,7 +523,7 @@ export async function POST(req: NextRequest) {
         const sentReply = await sendMail({
           inReplyTo: messageId,
           domain: mailgunDomainForAddress(mailbox.address),
-          from: mailbox.address,
+          from: fromWithDisplayName(client.company_name, mailbox.address),
           to: senderEmail,
           subject: replySubject,
           text: draft.body,
