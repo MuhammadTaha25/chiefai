@@ -320,7 +320,7 @@ export async function draftReplyEmail(params: {
   const calendlyUrl = params.calendlyUrl;
   const toneInstructions: Record<ReplySentiment, string> = {
     ANGRY:
-      "The recipient is annoyed or upset (they have NOT asked to be removed — that case is handled elsewhere). Change approach completely: do NOT pitch and do NOT use urgency or fear. Write ONE calm, short reply in a different voice from the earlier emails: briefly and sincerely apologise for the interruption, say you will not push, and make it easy for them — one short line saying that if a lighter touch or a different kind of information would be more useful you are happy to adjust, otherwise you will leave them be. No link. Use ONLY what the business context states about what we offer; do not invent numbers, results, customers or services. Under 60 words.",
+      "The recipient is annoyed or upset (they have NOT asked to be removed — that case is handled elsewhere). Change approach completely: do NOT pitch and do NOT use urgency or fear. Write ONE calm, short reply in a different voice from the earlier emails: briefly and sincerely apologise for the interruption, say you will not push, and make it easy for them — one short line saying that if a lighter touch or a different kind of information would be more useful you are happy to adjust, otherwise you will leave them be. Then close with one plain statement (NOT a question) that you will not write again unless they reply. Do NOT ask any question at all — not even about removing them from a list. No link. Use ONLY what the business context states about what we offer; do not invent numbers, results, customers or services. Under 60 words.",
     NOT_INTERESTED:
       "The recipient politely said no. Make ONE respectful retention attempt, written differently from the earlier emails. Start by thanking them for answering. Then, in plain words, make a gentle timing point: businesses like theirs that sort out this everyday problem sooner tend to be the ones customers reach first, so waiting has a cost — frame it as timing, never as a guarantee, never name or imply a specific competitor, and no numbers, percentages or invented results. Name what we do ONCE only. Then offer ONE very small next step (a short reply with a yes/no or a ten-minute look), using ONLY what the business context says we do. Put the sentence \"if the answer is still no, I will not write again\" just BEFORE your single closing question, and end with exactly ONE question mark in the whole email (one question, not two). No link. Under 80 words.",
     LATER:
@@ -356,7 +356,7 @@ Plain text only, no markdown. ${SPAM_SAFE_RULES}
 Respond with ONLY valid JSON matching exactly: {"subject": string, "body": string}`;
 
   const email = await generateJson<AidaEmail>(prompt);
-  if (params.sentiment === "LATER" && email?.body) {
+  if ((params.sentiment === "LATER" || params.sentiment === "ANGRY") && email?.body) {
     email.body = stripQuestions(email.body);
   }
   return email;
@@ -365,7 +365,8 @@ Respond with ONLY valid JSON matching exactly: {"subject": string, "body": strin
 const QUESTION_START = /^(does|do|is|are|was|were|will|would|can|could|should|shall|may|might|have|has|did|how|what|when|where|why|who|which)\b/i;
 
 /**
- * A "not now" acknowledgement must never ask anything. The model sometimes
+ * A "not now" acknowledgement and a reply to an angry person must never ask anything (an annoyed reader should
+ * not have to answer). The model sometimes
  * ignores that rule (and may even drop the "?"), so remove any sentence that
  * is a question, either by its "?" or by starting like one.
  */

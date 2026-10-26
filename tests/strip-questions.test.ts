@@ -14,3 +14,12 @@ test("LATER ack: sign-off paragraphs survive", () => {
   const out = stripQuestions("Thanks, Priya. No pressure. Is that fine?\n\nBest,\nInfomist QA");
   assert.equal(out, "Thanks, Priya. No pressure.\n\nBest,\nInfomist QA");
 });
+
+test("ANGRY reply: a trailing 'Should I remove you...' question is removed", () => {
+  const out = stripQuestions(
+    "Hi Priya,\n\nI am sincerely sorry for the interruption. I will not push our services on you.\n\nShould I remove you from our list?",
+  );
+  assert.ok(!out.includes("?"));
+  assert.ok(!out.includes("Should I remove"));
+  assert.ok(out.includes("sincerely sorry"));
+});
