@@ -167,7 +167,7 @@ const STOCK_PROPS = /\b(desk|laptop|coffee|workspace|tablet|modern office|glass 
 const HAPPENING = /\b(ring(s|ing)?|buzz(es|ing)?|missed|unanswered|pil(e|es|ing)|stack(s|ed)?|overflow(s|ing)?|notifications?|waiting|queue|messages?|blink(s|ing)?|flash(es|ing)?|flood(s|ed|ing)?|crowd(s|ed)?|lights up|unread|inbox|timer|clock)\b/i;
 // A hook speaks to the reader's own situation. A company introduction or a tool name is not a hook.
 const COMPANY_HOOK = /^(we|our|at [a-z0-9 ]+, we)\b/i;
-const JARGON = /\b(n8n|rag|api|llm|saas|crm|workflow automation platform|webhook)\b/i;
+const JARGON = /\b(n8n|rag|api|llm|saas|crm|workflow automation platform|webhook|built-for-you|done-for-you|built for you|done for you)\b/i;
 const ABSTRACT_VISUAL = /\b(concept|the impact of|the importance of|the idea of|the power of|productivity|synergy|digital transformation|bottleneck|workflow optimi[sz]ation)\b/i;
 
 // Numbers that claim a RESULT or a saving (hours saved, percentages, money) need evidence we do not have.
@@ -176,6 +176,18 @@ const CLAIM_NUMBER = /(\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten|t
 const FEATURE_HOOK = /^(you can|our|we|with [a-z ]+ you can|get|try|introducing|meet)\b/i;
 // Tidy "finished" scenes show the solved state; only solution/conversion posts may.
 const SOLVED_PROPS = /\b(whiteboard|completed tasks?|check ?marks?|dashboard|chart|graph|spreadsheet|trophy)\b/i;
+
+// What a visual is built from. Two scenes from the same family read as the same picture even with different jobs.
+const SCENE_FAMILIES: Record<string, RegExp> = {
+  ringing_phone: /\b(phone|smartphone|telephone|call|calls|ringing|buzz\w*|lights? up)\b/i,
+  night: /\b(night|dusk|dark|dim\w*|after (closing|hours)|evening|late)\b/i,
+  walking_away: /\b(walk\w*|leaving|leaves|heads?|out of|toward|to (their|his|her) car|doorway)\b/i,
+  unread_pile: /\b(unread|notifications?|pil(e|es)|stack|messages?)\b/i,
+};
+/** At most this many posts of one week may share a scene family (a phone is allowed twice, night or walking away once). */
+const FAMILY_LIMIT: Record<string, number> = { ringing_phone: 2, night: 1, walking_away: 1, unread_pile: 2 };
+// A conversion hook has to point to a next step; asking a mood question is not an offer.
+const NEXT_STEP = /\b(see|map|book|talk|show|try|walk|look|find out|ask|demo|message|dm|start|reply|let's|lets|free|call us|check)\b/i;
 
 /**
  * Returns why a set of model drafts is not good enough (so the model can be told and retry), or null when it is fine.
@@ -197,6 +209,7 @@ export function validateWeekDrafts(skeleton: WeekSkeletonEntry[], drafts: WeekId
     if (FEATURE_HOOK.test(d.hook.trim())) return `the hook for ${s.key} announces a feature instead of starting from the reader's situation or a real question`;
     if (!d.angle || !(ANGLES as readonly string[]).includes(d.angle)) return `entry ${s.key} needs an angle from: ${ANGLES.join(", ")}`;
     if ((s.pillar !== "solution" && s.pillar !== "conversion") && SOLVED_PROPS.test(d.visualIdea)) return `the visual idea for ${s.key} shows the finished solution (a whiteboard, chart or checklist) instead of the moment the post is about`;
+    if (s.pillar === "conversion" && !NEXT_STEP.test(d.hook)) return `the conversion hook for ${s.key} gives no next step to take`;
     if (JARGON.test(d.hook)) return `the hook for ${s.key} uses technical jargon a customer would not use`;
     if (STOCK_PROPS.test(d.visualIdea) && !HAPPENING.test(d.visualIdea)) return `the visual idea for ${s.key} is a stock-photo scene (a person at a desk or laptop) where nothing is happening`;
     const repeat = repeatsHistory({ topic: d.topic, hook: d.hook }, history);
@@ -210,6 +223,14 @@ export function validateWeekDrafts(skeleton: WeekSkeletonEntry[], drafts: WeekId
     }
     seen.push(d);
   }
+  // Visual variety across the whole week: families of scenes and near-identical pictures.
+  for (const [fam, re] of Object.entries(SCENE_FAMILIES)) {
+    const hits = skeleton.filter((sk) => re.test(byKey.get(sk.key)?.visualIdea ?? "")).map((sk) => sk.key);
+    if (hits.length > (FAMILY_LIMIT[fam] ?? 2)) return `too many visuals (${hits.join(", ")}) are the same kind of scene (${fam.replace("_", " ")}); show different actions and settings`;
+  }
+  for (let i = 0; i < seen.length; i++)
+    for (let j = i + 1; j < seen.length; j++)
+      if (similarity(seen[i].visualIdea, seen[j].visualIdea) >= 0.4) return `entries ${seen[i].key} and ${seen[j].key} show nearly the same picture`;
   return null;
 }
 
