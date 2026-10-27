@@ -75,8 +75,16 @@ const good = (sk: ReturnType<typeof planWeekSkeleton>) =>
   sk.map((s, i) => ({
     key: s.key,
     topic: ["Seller doubts about listing price", "Open house nobody visited", "Staging a small living room", "Why offers fall through at closing", "A buyer missing a call during a showing", "Mortgage letter versus cash offer", "Neighbours reading a sold sign"][i],
-    hook: ["Your listing price is not the price buyers see", "Nobody came to the open house?", "Three chairs can make a room feel bigger", "Closing day, and the buyer vanishes", "Missed the showing call again", "Cash or letter: which wins your sale", "A sold sign changes how the street talks"][i],
-    visualIdea: "A homeowner standing in a bright empty living room looking at a phone",
+    hook: (s.pillar === "conversion" ? "Book a free look at your closing process" : ["Your listing price is not the price buyers see", "Nobody came to the open house?", "Three chairs can make a room feel bigger", "Closing day, and the buyer vanishes", "Missed the showing call again", "Cash or letter: which wins your sale", "A sold sign changes how the street talks"][i]),
+    visualIdea: [
+      "A seller reading a price sticker on a living room window",
+      "A realtor in an empty garden holding open-house signs in the rain",
+      "A stylist rearranging three armchairs in a small bright room",
+      "A lawyer stacking signed folders on a long table",
+      "A buyer waiting beside a locked showing door with a key box",
+      "A banker sliding two envelopes across a counter",
+      "A street of houses with a red sold sign in one front yard",
+    ][i],
     angle: ["checklist", "demonstration", "misconception", "comparison", "decision_guide", "objection", "moment_story"][i],
   }));
 
@@ -182,4 +190,17 @@ test("skeleton: trust posts get a trust mechanism that needs no testimonial; oth
     else assert.equal(s.trustMechanism, undefined);
   }
   assert.ok(!(TRUST_MECHANISMS as readonly string[]).some((m) => /testimonial|case_study/.test(m)));
+});
+
+test("validation rejects: too many phone scenes, near-identical pictures, a conversion hook without a next step, 'done-for-you' wording", () => {
+  const sk = planWeekSkeleton(ctx, [], week);
+  const base = good(sk);
+  const phone = (i: number) => ({ visualIdea: `A person ${["pacing", "sitting", "standing", "kneeling", "leaning"][i]} in a hall as a phone rings loudly beside them` });
+  const three = base.map((d, i) => (i < 3 ? { ...d, ...phone(i) } : d));
+  assert.match(validateWeekDrafts(sk, three, [])!, /same kind of scene/);
+  const twin = base.map((d, i) => (i === 5 ? { ...d, visualIdea: base[4].visualIdea } : d));
+  assert.match(validateWeekDrafts(sk, twin, [])!, /nearly the same picture/);
+  const c = sk.findIndex((s) => s.pillar === "conversion");
+  assert.match(validateWeekDrafts(sk, base.map((d, i) => (i === c ? { ...d, hook: "Tired of losing deals every month?" } : d)), [])!, /no next step/);
+  assert.match(validateWeekDrafts(sk, base.map((d, i) => (i === 0 ? { ...d, hook: "Try our done-for-you desk for sellers" } : d)), [])!, /jargon|announces/);
 });
