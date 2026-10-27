@@ -32,8 +32,22 @@ export interface WeekSkeletonEntry {
   audience?: string;
   /** The one customer problem this post is about; different for every post of the week as far as the list allows. */
   painPoint?: string;
+  /** For trust posts: HOW trust is built. Only ways that need no testimonial or case study (none exist yet) are used. */
+  trustMechanism?: string;
   cta: string;
 }
+
+/** The kinds of angle a post can take. Two posts of one week never share an angle, even on the same problem. */
+export const ANGLES = ["checklist", "demonstration", "misconception", "comparison", "decision_guide", "objection", "moment_story", "audience_question"] as const;
+
+/** Trust without testimonials: show how it works, what happens when it fails, what it is not for. */
+export const TRUST_MECHANISMS = ["demonstration", "process_transparency", "limitation_and_safeguard", "technical_explanation"] as const;
+export const TRUST_BRIEF: Record<string, string> = {
+  demonstration: "show a (clearly fictional, illustrative) step-by-step example of how it works",
+  process_transparency: "explain how the work is done: what is set up first, what is tested, what the customer decides",
+  limitation_and_safeguard: "explain what happens when the system cannot answer or gets it wrong, and when a person takes over",
+  technical_explanation: "explain in plain words why it works this way, without tool names or jargon",
+};
 
 /** What the model adds for one entry. */
 export interface WeekIdeaDraft {
@@ -41,6 +55,8 @@ export interface WeekIdeaDraft {
   topic: string;
   hook: string;
   visualIdea: string;
+  /** One of ANGLES. Required from the model; older stored plans do not have it. */
+  angle?: string;
 }
 
 /** One stored entry of the week plan. */
@@ -123,6 +139,7 @@ export function planWeekSkeleton(ctx: BusinessContext, history: HistoryItem[], i
       }
     }
 
+    const trustsSoFar = out.filter((e) => e.pillar === "trust").length;
     const format: ContentFormat = it.format === "video" ? "video" : "image";
     const productName = chooseProduct(ctx, hist);
     out.push({
@@ -134,6 +151,7 @@ export function planWeekSkeleton(ctx: BusinessContext, history: HistoryItem[], i
       productName,
       audience: audiences.length ? audiences[(history.length + i) % audiences.length] : undefined,
       painPoint: problems.length ? problems[(problemOffset + i) % problems.length] : undefined,
+      trustMechanism: best === "trust" ? TRUST_MECHANISMS[(history.length + trustsSoFar) % TRUST_MECHANISMS.length] : undefined,
       cta: resolveCta(ctx, PILLAR_CTA[best], format),
     });
     picked.unshift({ content_pillar: best, product_name: productName ?? null, topic: null, hook: null });
@@ -152,6 +170,13 @@ const COMPANY_HOOK = /^(we|our|at [a-z0-9 ]+, we)\b/i;
 const JARGON = /\b(n8n|rag|api|llm|saas|crm|workflow automation platform|webhook)\b/i;
 const ABSTRACT_VISUAL = /\b(concept|the impact of|the importance of|the idea of|the power of|productivity|synergy|digital transformation|bottleneck|workflow optimi[sz]ation)\b/i;
 
+// Numbers that claim a RESULT or a saving (hours saved, percentages, money) need evidence we do not have.
+const CLAIM_NUMBER = /(\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|fifty|hundred|thousand)\s*(hours?|percent|times|x)\b|\d\s*%|[$£€]\s*\d|\bthousands?\b|\bmillions?\b)/i;
+// A bare feature statement is not a hook ("You can automatically ...").
+const FEATURE_HOOK = /^(you can|our|we|with [a-z ]+ you can|get|try|introducing|meet)\b/i;
+// Tidy "finished" scenes show the solved state; only solution/conversion posts may.
+const SOLVED_PROPS = /\b(whiteboard|completed tasks?|check ?marks?|dashboard|chart|graph|spreadsheet|trophy)\b/i;
+
 /**
  * Returns why a set of model drafts is not good enough (so the model can be told and retry), or null when it is fine.
  * Rules: one complete draft per planned post; no repeated or near-identical topics/hooks inside the week or against
@@ -168,11 +193,16 @@ export function validateWeekDrafts(skeleton: WeekSkeletonEntry[], drafts: WeekId
     if (ABSTRACT_VISUAL.test(d.visualIdea)) return `the visual idea for ${s.key} describes an idea, not something that can be seen`;
     if (words(d.hook).length > 22) return `the hook for ${s.key} was too long`;
     if (COMPANY_HOOK.test(d.hook.trim())) return `the hook for ${s.key} introduces the company instead of speaking to the reader's situation`;
+    if (CLAIM_NUMBER.test(d.hook) || CLAIM_NUMBER.test(d.topic)) return `the hook or topic for ${s.key} states a number of hours, a percentage or an amount, which we cannot prove`;
+    if (FEATURE_HOOK.test(d.hook.trim())) return `the hook for ${s.key} announces a feature instead of starting from the reader's situation or a real question`;
+    if (!d.angle || !(ANGLES as readonly string[]).includes(d.angle)) return `entry ${s.key} needs an angle from: ${ANGLES.join(", ")}`;
+    if ((s.pillar !== "solution" && s.pillar !== "conversion") && SOLVED_PROPS.test(d.visualIdea)) return `the visual idea for ${s.key} shows the finished solution (a whiteboard, chart or checklist) instead of the moment the post is about`;
     if (JARGON.test(d.hook)) return `the hook for ${s.key} uses technical jargon a customer would not use`;
     if (STOCK_PROPS.test(d.visualIdea) && !HAPPENING.test(d.visualIdea)) return `the visual idea for ${s.key} is a stock-photo scene (a person at a desk or laptop) where nothing is happening`;
     const repeat = repeatsHistory({ topic: d.topic, hook: d.hook }, history);
     if (repeat) return `entry ${s.key}: ${repeat}`;
     for (const o of seen) {
+      if (d.angle && d.angle === o.angle) return `entries ${o.key} and ${d.key} use the same angle (${d.angle}); each post of the week needs a different one`;
       if (similarity(d.topic, o.topic) >= 0.5) return `entries ${o.key} and ${d.key} have nearly the same topic`;
       if (similarity(d.hook, o.hook) >= 0.6) return `entries ${o.key} and ${d.key} have nearly the same hook`;
       const open = (h: string) => words(h).slice(0, 3).join(" ").toLowerCase();
@@ -188,7 +218,7 @@ export function mergeWeek(skeleton: WeekSkeletonEntry[], drafts: WeekIdeaDraft[]
   const byKey = new Map(drafts.map((d) => [d.key, d]));
   return skeleton.map((s) => {
     const d = byKey.get(s.key)!;
-    return { ...s, topic: d.topic.trim(), hook: d.hook.trim(), visualIdea: d.visualIdea.trim() };
+    return { ...s, topic: d.topic.trim(), hook: d.hook.trim(), visualIdea: d.visualIdea.trim(), angle: d.angle };
   });
 }
 

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  TRUST_MECHANISMS,
   conversionCap,
   painPointList,
   entryKey,
@@ -76,6 +77,7 @@ const good = (sk: ReturnType<typeof planWeekSkeleton>) =>
     topic: ["Seller doubts about listing price", "Open house nobody visited", "Staging a small living room", "Why offers fall through at closing", "A buyer missing a call during a showing", "Mortgage letter versus cash offer", "Neighbours reading a sold sign"][i],
     hook: ["Your listing price is not the price buyers see", "Nobody came to the open house?", "Three chairs can make a room feel bigger", "Closing day, and the buyer vanishes", "Missed the showing call again", "Cash or letter: which wins your sale", "A sold sign changes how the street talks"][i],
     visualIdea: "A homeowner standing in a bright empty living room looking at a phone",
+    angle: ["checklist", "demonstration", "misconception", "comparison", "decision_guide", "objection", "moment_story"][i],
   }));
 
 test("validation accepts a clean, varied week and merges it", () => {
@@ -155,4 +157,29 @@ test("validation rejects a hook that introduces the company or uses a tool name"
   assert.match(validateWeekDrafts(sk, company, [])!, /introduces the company/);
   const jargon = base.map((d, i) => (i === 5 ? { ...d, hook: "Connect your tools with custom n8n flows built for you" } : d));
   assert.match(validateWeekDrafts(sk, jargon, [])!, /jargon/);
+});
+
+test("validation rejects: result numbers, feature hooks, solved-state visuals, repeated angle, missing angle", () => {
+  const sk = planWeekSkeleton(ctx, [], week);
+  const base = good(sk);
+  const at = (i: number, patch: object) => base.map((d, j) => (j === i ? { ...d, ...patch } : d));
+
+  assert.match(validateWeekDrafts(sk, at(1, { hook: "Reclaim ten hours of work every week" }), [])!, /number of hours/);
+  assert.match(validateWeekDrafts(sk, at(1, { hook: "Cut costs by 40% this month" }), [])!, /number of hours|percentage/);
+  assert.equal(validateWeekDrafts(sk, at(1, { hook: "Five buyers asked the same question today" }), []), null, "a plain count of people is not a result claim");
+  assert.match(validateWeekDrafts(sk, at(1, { hook: "You can automatically answer every missed call" }), [])!, /announces a feature/);
+  assert.match(validateWeekDrafts(sk, at(1, { angle: undefined }), [])!, /needs an angle/);
+  assert.match(validateWeekDrafts(sk, at(1, { angle: "inspiration" }), [])!, /needs an angle/);
+  assert.match(validateWeekDrafts(sk, at(2, { angle: base[0].angle }), [])!, /same angle/);
+  const problem = sk.findIndex((s) => s.pillar !== "solution" && s.pillar !== "conversion");
+  assert.match(validateWeekDrafts(sk, at(problem, { visualIdea: "A manager in a doorway pointing at a whiteboard of completed tasks" }), [])!, /finished solution/);
+});
+
+test("skeleton: trust posts get a trust mechanism that needs no testimonial; other pillars get none", () => {
+  const sk = planWeekSkeleton(ctx, [], week);
+  for (const s of sk) {
+    if (s.pillar === "trust") assert.ok(TRUST_MECHANISMS.includes(s.trustMechanism as never));
+    else assert.equal(s.trustMechanism, undefined);
+  }
+  assert.ok(!(TRUST_MECHANISMS as readonly string[]).some((m) => /testimonial|case_study/.test(m)));
 });
