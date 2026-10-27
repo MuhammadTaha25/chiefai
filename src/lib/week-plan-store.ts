@@ -3,7 +3,7 @@ import { retrieveBusinessContext, type BusinessContext } from "@/lib/business-co
 import { PILLAR_BRIEF, formatHistory, type HistoryItem } from "@/lib/content-strategy";
 import { planWeekIdeas } from "@/lib/social-ai";
 import type { PlannedItem } from "@/lib/social-schedule";
-import { mergeWeek, parseWeekEntries, planWeekSkeleton, validateWeekDrafts, type WeekEntry } from "@/lib/week-plan";
+import { TRUST_BRIEF, mergeWeek, parseWeekEntries, planWeekSkeleton, validateWeekDrafts, type WeekEntry } from "@/lib/week-plan";
 import { validateOutbound } from "@/lib/brand-guard";
 
 /**
@@ -53,6 +53,7 @@ export async function ensureWeekPlan(
           productName: s.productName,
           audience: s.audience,
           painPoint: s.painPoint,
+          trustBrief: s.trustMechanism ? TRUST_BRIEF[s.trustMechanism] : undefined,
         })),
         rejectedBecause,
       });

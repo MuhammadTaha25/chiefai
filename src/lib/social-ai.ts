@@ -118,7 +118,7 @@ export interface WeekIdeaRequest {
   businessContext: string;
   historyBlock: string;
   /** Per planned post, already decided by code. */
-  entries: { key: string; dayName: string; format: "image" | "carousel" | "video"; pillar: string; pillarBrief: string; productName?: string; audience?: string; painPoint?: string }[];
+  entries: { key: string; dayName: string; format: "image" | "carousel" | "video"; pillar: string; pillarBrief: string; productName?: string; audience?: string; painPoint?: string; trustBrief?: string }[];
   /** Why the previous attempt was not accepted. */
   rejectedBecause?: string;
 }
@@ -128,11 +128,11 @@ export interface WeekIdeaRequest {
  * and CTA of every post are fixed by code and not up for discussion. Hook rules follow common scroll-stopping practice:
  * specific, relevant to the reader, an honest curiosity gap, never invented numbers.
  */
-export async function planWeekIdeas(params: WeekIdeaRequest): Promise<{ key: string; topic: string; hook: string; visualIdea: string }[]> {
+export async function planWeekIdeas(params: WeekIdeaRequest): Promise<{ key: string; topic: string; hook: string; visualIdea: string; angle: string }[]> {
   const list = params.entries
     .map(
       (e) =>
-        `- key "${e.key}" (${e.dayName}, ${e.format}): pillar ${e.pillar} — ${e.pillarBrief}${e.productName ? ` | focus: ${e.productName}` : ""}${e.audience ? ` | audience: ${e.audience}` : ""}${e.painPoint ? ` | the customer problem this post is about: ${e.painPoint}` : ""}`,
+        `- key "${e.key}" (${e.dayName}, ${e.format}): pillar ${e.pillar} — ${e.pillarBrief}${e.productName ? ` | focus: ${e.productName}` : ""}${e.audience ? ` | audience: ${e.audience}` : ""}${e.painPoint ? ` | the customer problem this post is about: ${e.painPoint}` : ""}${e.trustBrief ? ` | trust is built by: ${e.trustBrief}` : ""}`,
     )
     .join("\n");
   const prompt = `${params.businessContext ? params.businessContext + "\n\n" : ""}${params.historyBlock ? params.historyBlock + "\n\n" : ""}You are ${params.companyName}'s social media strategist. Plan this week's feed posts as ONE set, so they are clearly different from each other and from the recent posts above.
@@ -144,14 +144,18 @@ For every post write:
 - topic: a specific, concrete title a customer would stop for. NOT an abstract theme ("The impact of X on productivity"). Name a real situation, problem or question from this business's own world.
 - hook: the first line of the post, under 18 words, written to the reader about THEIR situation ("you", their day, their problem). Specific beats vague. Pair something the reader recognises about themselves with a real curiosity gap. Honest: the post must deliver what the hook promises. Use no invented numbers, results or claims. NEVER start a hook with "We" or "Our" and never introduce the company in the hook (for a trust post, the hook is about what the reader gets or what changes for them, and the proof goes in the caption). No tool or technology names (n8n, RAG, API ...): say what it does for the customer. Vary the openings across the week (do not start two hooks with the same words).
 - visualIdea: ONE sentence saying exactly what the picture or video SHOWS. It must show the PROBLEM or the OUTCOME the hook talks about, as a moment where something is visibly happening to a concrete person in one setting (e.g. "A shop owner holding a customer's bag with both hands while the phone on the counter lights up with a missed call"). It must NOT be a generic stock scene of a person at a desk, laptop, coffee, calendar or office; if the hook is about calls, show calls; if about messages, show a pile of unanswered messages; if about hours lost, show the late hour and the work still waiting. It must be something a camera can film; never an idea, a chart or a concept. For a video it must be a single scene with ONE subject, ONE action and ONE setting, no text on screen. Do not show real brand logos or identifiable real people.
+- angle: HOW the post says it, exactly one of: checklist, demonstration, misconception, comparison, decision_guide, objection, moment_story, audience_question. Every post of the week MUST use a different angle, even when two posts are about the same problem (same problem + different angle = fine; same angle = not).
+- Hooks: start from a concrete moment, a recognisable situation, a useful observation or a specific question. Never open with a feature ("You can automatically ..."), generic openers ("Imagine", "Did you know"), or a hypothetical benefit. Do not make every hook a question. Never state a number of hours, a percentage or an amount of money.
+- The post must fit its pillar: educational teaches one thing; problem_awareness makes one costly situation recognisable (show the moment of friction, not the solved state); solution explains how one thing works including its limits; trust reduces doubt by the way given for that post (never invented customers, results or testimonials); engagement asks one specific, easy-to-answer question; conversion offers one clear next step.
+- The visual must not show the finished, tidy solution (whiteboard of completed tasks, chart, dashboard) in a problem or trust post; and different days should use different compositions and actions, not only different jobs.
 - Posts that share a pillar must still be about different customer problems; follow the customer problem given for each post.
 
 Only use facts found in the business context. No invented offers, prices, results, awards or testimonials. No fake urgency.${params.rejectedBecause ? `\n\nIMPORTANT: your previous plan was not accepted because ${params.rejectedBecause}. Fix that.` : ""}
 
-Respond with ONLY valid JSON: {"entries": [{"key": string, "topic": string, "hook": string, "visualIdea": string}]} with exactly one entry per key above.`;
-  const out = await generateJson<{ entries?: { key?: unknown; topic?: unknown; hook?: unknown; visualIdea?: unknown }[] }>(prompt);
+Respond with ONLY valid JSON: {"entries": [{"key": string, "topic": string, "hook": string, "visualIdea": string, "angle": string}]} with exactly one entry per key above.`;
+  const out = await generateJson<{ entries?: { key?: unknown; topic?: unknown; hook?: unknown; visualIdea?: unknown; angle?: unknown }[] }>(prompt);
   const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
-  return (Array.isArray(out.entries) ? out.entries : []).map((e) => ({ key: str(e.key), topic: str(e.topic), hook: str(e.hook), visualIdea: str(e.visualIdea) }));
+  return (Array.isArray(out.entries) ? out.entries : []).map((e) => ({ key: str(e.key), topic: str(e.topic), hook: str(e.hook), visualIdea: str(e.visualIdea), angle: str(e.angle) }));
 }
 
 // ---- Grounded comment / DM replies ----------------------------------------
